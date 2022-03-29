@@ -24,10 +24,8 @@ typedef struct t_desc_define
 
 // terminal placement.
 const desc_define end_desc = { NULL, dt_none, 0, 0, NULL };
-
 // define struct
 const desc_define sub_type[] { { "thing", dt_none, 4, 0, NULL }, end_desc };
-
 const desc_define my_type[] { { "thing", dt_none, 4, 0, sub_type }, end_desc };
 //
 // the allocator can remove a ptr network.
