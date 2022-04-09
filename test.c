@@ -2,7 +2,7 @@
 #include "cstream.h"
 
 #define CTEST_ENABLED
-#include "ctest.h"
+#include "ctest/ctest.h"
 
 int main()
 {

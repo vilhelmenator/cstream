@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define PAGE_SIZE 4096 * 8
+const static uint64_t page_size = 4096 * 8;
 const static uint64_t partmask = 0x80000000000000;
 const static uint32_t endian_test = 1;
 static inline int is_little_endian() { return (*(char *)&endian_test == 1); }
@@ -109,7 +109,7 @@ size_t stream_op(file_stream *fs, void *src, size_t sm)
 void resize_buffer(file_stream *fs, size_t sm)
 {
     // resize the buffer to include the next size rounded up to the next os page
-    size_t next_size = round_up(sm + fs->buffer_size, PAGE_SIZE);
+    size_t next_size = round_up(sm + fs->buffer_size, page_size);
     if ((fs->file_ptr + next_size) > fs->file_size) {
         next_size = fs->file_size - fs->file_ptr;
     }
@@ -126,7 +126,7 @@ size_t sync_stream(file_stream *fs, size_t sm)
         if ((sm + fs->file_ptr) >= fs->file_size) {
             return 0;
         }
-        size_t next_size = PAGE_SIZE;
+        size_t next_size = page_size;
         size_t opres = 0;
         if (fs->buffer_ptr == fs->buffer_size) {
             // we can reuse the previous buffer
@@ -179,7 +179,7 @@ file_stream *open_stream(const char *p, file_stream_mode mode)
     rewind(fd);
 
     if (mode == READ) {
-        new_stream->buffer_size = PAGE_SIZE;
+        new_stream->buffer_size = page_size;
         if (new_stream->file_size < new_stream->buffer_size) {
             new_stream->buffer_size = new_stream->file_size;
         }
