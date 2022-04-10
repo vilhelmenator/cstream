@@ -2,11 +2,22 @@
 
 #pragma once
 
+#include <fcntl.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+#if defined(_MSC_VER)
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#else
+#include <unistd.h>
+#endif
 
 const static uint64_t page_size = 4096 * 8;
 const static uint64_t partmask = 0x80000000000000;
@@ -41,7 +52,7 @@ typedef enum file_stream_mode_e {
 typedef struct file_stream_t
 {
     // file data
-    FILE *fd;
+    int32_t fd;
     uint8_t *file_path;
     size_t file_size;
     size_t file_ptr;
@@ -100,9 +111,9 @@ void debug_step(const char *filename, int32_t linenr, const char *format, ...)
 size_t stream_op(file_stream *fs, void *src, size_t sm)
 {
     if (fs->mode == READ) {
-        return fread(src, 1, sm, fs->fd);
+        return read(fs->fd, src, sm);
     } else {
-        return fwrite(src, 1, sm, fs->fd);
+        return write(fs->fd, src, sm);
     }
 }
 
@@ -120,6 +131,11 @@ void resize_buffer(file_stream *fs, size_t sm)
 
 size_t sync_stream(file_stream *fs, size_t sm)
 {
+    //
+    // if sm is larger than the current buffer,
+    // enlarge the buffer, ronded up to the next os page boundary.
+    //
+    // else if()
     // are we requesting data beyond the buffer size?
     if ((sm + fs->buffer_ptr) > fs->buffer_size) {
         // Are we requesting data beyond the file size?
@@ -157,10 +173,19 @@ size_t sync_stream(file_stream *fs, size_t sm)
 
 file_stream *open_stream(const char *p, file_stream_mode mode)
 {
-    FILE *fd = fopen(p, mode == READ ? "rb" : "wb");
-    if (fd == NULL) {
+    int32_t fd = open(p, mode == READ ? O_RDONLY, S_IREAD : O_RDWR | O_CREAT | O_TRUNC,
+        S_IREAD | S_IWRITE);
+
+    if (fd == -1) {
         return NULL;
     }
+    struct stat stats;
+    int32_t status = fstat(fd, &stats);
+    if (status != 0) {
+        close(fd);
+        return NULL;
+    }
+
     // copy our path string into the stream
     uint32_t path_len = strlen(p) + 1;
     uint8_t *path_string = (uint8_t *)malloc(path_len);
@@ -172,11 +197,8 @@ file_stream *open_stream(const char *p, file_stream_mode mode)
     new_stream->file_path = path_string;
     new_stream->fd = fd;
     new_stream->mode = mode;
-
     // get file size
-    fseek(fd, 0L, SEEK_END);
-    new_stream->file_size = ftell(fd);
-    rewind(fd);
+    new_stream->file_size = stats.st_size;
 
     if (mode == READ) {
         new_stream->buffer_size = page_size;
@@ -184,7 +206,7 @@ file_stream *open_stream(const char *p, file_stream_mode mode)
             new_stream->buffer_size = new_stream->file_size;
         }
         new_stream->buffer = (uint8_t *)malloc(new_stream->buffer_size);
-        fread(new_stream->buffer, new_stream->buffer_size, 1, fd);
+        read(fd, new_stream->buffer, new_stream->buffer_size);
         new_stream->file_ptr = new_stream->buffer_size;
     } else {
         new_stream->buffer_size = 0;
@@ -199,7 +221,7 @@ void close_stream(file_stream *stream)
 {
     // release our buffer and file descriptor
     if (stream) {
-        fclose(stream->fd);
+        close(stream->fd);
         // release our heap stores
         free(stream->file_path);
         free(stream->buffer);
@@ -238,7 +260,7 @@ int is_eol(char c)
 
 int read_line_char(file_stream *fs, char *buff, size_t buff_size)
 {
-
+    // eat the initial new line tokens
     size_t buff_idx = 0;
     void *cr = NULL;
     char c = 0;
@@ -253,6 +275,7 @@ int read_line_char(file_stream *fs, char *buff, size_t buff_size)
         }
         c = *(char *)cr;
     }
+    // eat until you hit a newline token.
     do {
         if (buff_idx >= buff_size) {
             break;
@@ -264,6 +287,7 @@ int read_line_char(file_stream *fs, char *buff, size_t buff_size)
         }
         c = *(char *)cr;
     } while (!is_eol(c));
+    // stick a null terminator to it.
     buff[buff_idx] = 0;
     return 1;
 }

@@ -7,6 +7,9 @@
 int main()
 {
     //
+    // fwrite, fread, fopen, fclose, getc, putc, ftell, rewind, fseek, fstat
+    //
+    //
     // perf stats reading.
     // perf stats writing.
     // perf stats reading lines.
@@ -20,20 +23,21 @@ int main()
     // test bitstream writing
     // test bitstream reading
     //
+    
     START_TEST(stream, {});
-    FILE *f = fopen("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", "rb");
-    fseek(f, 0L, SEEK_END);
-    size_t s = ftell(f);
-    rewind(f);
-    printf("file size %zu\n", s);
-    char* bu = (char*)malloc(s);
+    /*
+    int fd = open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", O_RDONLY, S_IREAD);
+    struct stat stats;
+    int32_t status = fstat(fd, &stats);
+    printf("file size %zu\n", stats.st_size);
+    char* bu = (char*)malloc(stats.st_size);
     MEASURE_MS(stream, file_read_whole, {
         
-        fread(bu, s, 1, f);
+        read(fd, bu, stats.st_size);
         
     });
     free(bu);
-    fclose(f);
+    close(fd);
 
     file_stream *fs = open_stream("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
     
@@ -49,7 +53,7 @@ int main()
     
     close_stream(fs);
     char buff[8];
-    f = fopen("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", "rb");
+    FILE* f = fopen("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", "rb");
     MEASURE_MS(stream, file_read_8bytes, {
     while(fread(&buff, 8, 1, f))
     {
@@ -79,6 +83,18 @@ int main()
     }
     });
     fclose(f);
+    
+    */
+    file_stream *fs = open_stream("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
+    char lbuff[1024];
+    MEASURE_MS(stream, file_read_line, {
+    while(read_line_char(fs, &lbuff[0], 1024))
+    {
+
+    }
+    });
+    close_stream(fs);
+
     END_TEST(stream, {});
     return 0;
 }
