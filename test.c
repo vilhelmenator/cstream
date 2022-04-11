@@ -4,6 +4,25 @@
 #define CTEST_ENABLED
 #include "ctest/ctest.h"
 
+
+int read_line(FILE *fd, char *buff, size_t s)
+{
+    char c;
+    int offset = 0;
+    do { // read one line
+        c = fgetc(fd);
+        if (c != EOF) {
+            if (offset < s) {
+                buff[offset++] = c;
+            }
+        }
+    } while (c != EOF && c != '\n');
+    buff[offset - 1] = 0;
+    if (c == EOF) {
+        return 0;
+    }
+    return 1;
+}
 int main()
 {
     //
@@ -25,11 +44,11 @@ int main()
     //
     
     START_TEST(stream, {});
-    /*
+    
     int fd = open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", O_RDONLY, S_IREAD);
     struct stat stats;
     int32_t status = fstat(fd, &stats);
-    printf("file size %zu\n", stats.st_size);
+    printf("file size %lli\n", stats.st_size);
     char* bu = (char*)malloc(stats.st_size);
     MEASURE_MS(stream, file_read_whole, {
         
@@ -84,17 +103,31 @@ int main()
     });
     fclose(f);
     
-    */
-    file_stream *fs = open_stream("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
-    char lbuff[1024];
-    MEASURE_MS(stream, file_read_line, {
-    while(read_line_char(fs, &lbuff[0], 1024))
+    
+    fs = open_stream("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
+    char* line = 0;
+    MEASURE_MS(stream, file_stream_read_line, {
+    while(read_line_char(fs, &line))
     {
 
     }
     });
     close_stream(fs);
 
+    char lbuff[1024];
+    f = fopen("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", "rb");
+    MEASURE_MS(stream, file_read_line, {
+    while(read_line(f, lbuff, 1024))
+    {
+
+    }
+    });
+    fclose(f);
     END_TEST(stream, {});
+
+
+    //
+    // when reading small sizes from the file.
+    // raw access to the buffer
     return 0;
 }

@@ -16,13 +16,18 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #else
+#include <termios.h>
 #include <unistd.h>
 #endif
 
-const static uint64_t page_size = 4096 * 8;
+const static uint64_t page_size = 4096;
+const static uint64_t alloc_size = page_size * 8;
 const static uint64_t partmask = 0x80000000000000;
 const static uint32_t endian_test = 1;
 static inline int is_little_endian() { return (*(char *)&endian_test == 1); }
+
+#define next_page_multiple(s) ((s + (page_size - 1)) & ~(page_size - 1))
+#define prev_page_multiple(s) (s & ~(page_size - 1))
 
 static inline uintptr_t round_mul(uintptr_t v, size_t mul)
 {
@@ -84,16 +89,35 @@ int dbg_read_line(FILE *fd, char *buff)
 
 void debug_step(const char *filename, int32_t linenr, const char *format, ...)
 {
+#if !defined(_MSC_VER)
+    struct termios info;
+    tcgetattr(0, &info); /* get current terminal attirbutes; 0 is the file descriptor for stdin */
+    info.c_lflag &= ~ICANON; /* disable canonical mode */
+    info.c_cc[VMIN] = 1; /* wait until at least one keystroke available */
+    info.c_cc[VTIME] = 0; /* no timeout */
+    tcsetattr(0, TCSANOW, &info); /* set immediately */
+#endif
     va_list myargs;
     va_start(myargs, format);
     FILE *f = fopen(filename, "rb");
     char line[1024];
+    char prebuff[1024];
     int32_t line_nr = 0;
     while (dbg_read_line(f, line)) {
         line_nr++;
         int32_t dist = abs(line_nr - linenr);
         if (dist <= 3) {
             if (dist == 0) {
+                //
+                //
+                int c = 0;
+                while (line[c] == ' ') {
+                    prebuff[c++] = ' ';
+                }
+                prebuff[c++] = '/';
+                prebuff[c++] = '/';
+                prebuff[c++] = ' ';
+                printf("%s", prebuff);
                 vprintf(format, myargs);
             } else {
                 printf("%s\n", line);
@@ -104,11 +128,17 @@ void debug_step(const char *filename, int32_t linenr, const char *format, ...)
         }
     }
     va_end(myargs);
-    getchar();
+
+    switch (getchar()) {
+    case 27:
+        exit(1);
+    default:
+        break;
+    }
 }
 #define log_dgb(fmt, ...) debug_step(__FILE__, __LINE__, fmt, __VA_ARGS__);
 
-size_t stream_op(file_stream *fs, void *src, size_t sm)
+ssize_t stream_op(file_stream *fs, void *src, size_t sm)
 {
     if (fs->mode == READ) {
         return read(fs->fd, src, sm);
@@ -117,57 +147,60 @@ size_t stream_op(file_stream *fs, void *src, size_t sm)
     }
 }
 
-void resize_buffer(file_stream *fs, size_t sm)
+size_t resize_buffer(file_stream *fs, size_t sm)
 {
-    // resize the buffer to include the next size rounded up to the next os page
-    size_t next_size = round_up(sm + fs->buffer_size, page_size);
+    size_t head = prev_page_multiple(fs->buffer_ptr);
+    size_t tail = next_page_multiple(sm + fs->buffer_ptr);
+    size_t span = tail - head;
+    size_t start_offset = fs->buffer_ptr - head;
+    size_t remaining_file_size = fs->file_size - fs->file_ptr;
+    fs->buffer_ptr = start_offset;
+
+    //   if we need more space for our buffer
+    if (span > fs->buffer_size) {
+        free(fs->buffer);
+        fs->buffer = (uint8_t *)malloc(span);
+        fs->buffer_size = span;
+    }
+
+    // do we need to rewind
+    if (start_offset > 0) {
+        // rewind to our last page multiple
+        lseek(fs->fd, -fs->buffer_ptr, SEEK_CUR);
+        fs->file_ptr = -fs->buffer_ptr;
+    }
+
+    size_t next_size = fs->buffer_size;
     if ((fs->file_ptr + next_size) > fs->file_size) {
         next_size = fs->file_size - fs->file_ptr;
     }
 
-    fs->buffer = (uint8_t *)realloc(fs->buffer, next_size);
-    fs->buffer_size = next_size;
+    return next_size;
 }
 
 size_t sync_stream(file_stream *fs, size_t sm)
 {
-    //
-    // if sm is larger than the current buffer,
-    // enlarge the buffer, ronded up to the next os page boundary.
-    //
-    // else if()
-    // are we requesting data beyond the buffer size?
-    if ((sm + fs->buffer_ptr) > fs->buffer_size) {
-        // Are we requesting data beyond the file size?
-        if ((sm + fs->file_ptr) >= fs->file_size) {
-            return 0;
-        }
-        size_t next_size = page_size;
-        size_t opres = 0;
-        if (fs->buffer_ptr == fs->buffer_size) {
-            // we can reuse the previous buffer
 
-            // don't try to read beyond the file size.
-            if ((fs->file_ptr + next_size) > fs->file_size) {
-                next_size = fs->file_size - fs->file_ptr;
-            }
-
-            // read the next batch from file.
-            size_t opres;
-            if ((opres = stream_op(fs, fs->buffer, next_size)) != next_size) {
-                return 0;
-            }
-        } else {
-            // this needs to try and avoid resizing the buffer
-            size_t prev_buffer_size = fs->buffer_size;
-            resize_buffer(fs, sm);
-            size_t step_size = fs->buffer_size - prev_buffer_size;
-            if ((opres = stream_op(fs, &fs->buffer[prev_buffer_size], step_size)) != step_size) {
-                return 0;
-            }
-        }
-        fs->file_ptr += next_size;
+    if ((sm + fs->file_ptr) >= fs->file_size) {
+        return 0;
     }
+    size_t next_size = fs->buffer_size;
+    ssize_t opres = 0;
+    if (fs->buffer_ptr == fs->buffer_size) {
+        fs->buffer_ptr = 0;
+        if (sm > fs->buffer_size) {
+            next_size = resize_buffer(fs, sm);
+        }
+    } else {
+        next_size = resize_buffer(fs, sm);
+    }
+
+    // read the next batch from file.
+    if ((opres = stream_op(fs, fs->buffer, next_size)) == -1) {
+        return 0;
+    }
+    fs->file_ptr += next_size;
+
     return 1;
 }
 
@@ -201,7 +234,7 @@ file_stream *open_stream(const char *p, file_stream_mode mode)
     new_stream->file_size = stats.st_size;
 
     if (mode == READ) {
-        new_stream->buffer_size = page_size;
+        new_stream->buffer_size = alloc_size;
         if (new_stream->file_size < new_stream->buffer_size) {
             new_stream->buffer_size = new_stream->file_size;
         }
@@ -231,9 +264,13 @@ void close_stream(file_stream *stream)
 
 void *read_stream(size_t sm, file_stream *fs)
 {
-    if (sync_stream(fs, sm) == 0) {
-        return NULL;
+    // are we requesting data beyond the buffer size?
+    if ((sm + fs->buffer_ptr) > fs->buffer_size) {
+        if (sync_stream(fs, sm) == 0) {
+            return 0;
+        }
     }
+
     // otherwise, jsut grab the value from the buffer
     uint8_t *res = &fs->buffer[fs->buffer_ptr];
     fs->buffer_ptr += sm;
@@ -246,9 +283,11 @@ int is_eol(char c)
     // null terminator C0 80 in some odd java unicode world
     //
     switch (c) {
+    case 0x0:
     case 0xA:
     case 0xB:
     case 0xC:
+    case EOF:
     case 0xD: {
         return 1;
     }
@@ -258,38 +297,35 @@ int is_eol(char c)
     }
 }
 
-int read_line_char(file_stream *fs, char *buff, size_t buff_size)
+size_t read_line_char(file_stream *fs, char **line_start)
 {
-    // eat the initial new line tokens
-    size_t buff_idx = 0;
-    void *cr = NULL;
-    char c = 0;
-    if ((cr = read_stream(1, fs)) == NULL) {
-        return 0;
-    }
-    c = *(char *)cr;
-    while (is_eol(c)) {
-        if ((cr = read_stream(1, fs)) == NULL) {
-            buff[0] = 0;
-            return 0;
-        }
-        c = *(char *)cr;
-    }
-    // eat until you hit a newline token.
+    char c;
+    size_t line_len = 0;
     do {
-        if (buff_idx >= buff_size) {
-            break;
+        // are we requesting data beyond the buffer size?
+        if ((1 + fs->buffer_ptr) > fs->buffer_size) {
+            if (sync_stream(fs, 1) == 0) {
+                return 0;
+            }
         }
-        buff[buff_idx++] = c;
-        if ((cr = read_stream(1, fs)) == NULL) {
-            buff[buff_idx] = 0;
-            return 0;
+        // otherwise, jsut grab the value from the buffer
+        c = fs->buffer[fs->buffer_ptr++];
+    } while (!is_eol(c));
+    *line_start = (char *)&fs->buffer[fs->buffer_ptr];
+    do {
+        // are we requesting data beyond the buffer size?
+        if ((1 + fs->buffer_ptr) > fs->buffer_size) {
+            if (sync_stream(fs, 1) == 0) {
+                return line_len;
+            }
         }
-        c = *(char *)cr;
+        // otherwise, jsut grab the value from the buffer
+        c = fs->buffer[fs->buffer_ptr++];
+        line_len++;
     } while (!is_eol(c));
     // stick a null terminator to it.
-    buff[buff_idx] = 0;
-    return 1;
+
+    return line_len;
 }
 
 int read_line_unicode(file_stream *fs, short *buff, size_t buff_size)
@@ -325,8 +361,10 @@ int read_line_unicode(file_stream *fs, short *buff, size_t buff_size)
 
 int32_t write_stream(void *src, size_t sm, file_stream *fs)
 {
-    if (sync_stream(fs, sm) == 0) {
-        return 0;
+    if ((sm + fs->buffer_ptr) > fs->buffer_size) {
+        if (sync_stream(fs, sm) == 0) {
+            return 0;
+        }
     }
     memcpy(&fs->buffer[fs->buffer_ptr], src, sm);
     fs->buffer_ptr += sm;
