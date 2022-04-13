@@ -5,7 +5,7 @@
 #include "ctest/ctest.h"
 
 
-int read_line(FILE *fd, char *buff, size_t s)
+int file_read_line(FILE *fd, char *buff, size_t s)
 {
     char c;
     int offset = 0;
@@ -23,28 +23,43 @@ int read_line(FILE *fd, char *buff, size_t s)
     }
     return 1;
 }
+
 int main()
 {
     //
-    // fwrite, fread, fopen, fclose, getc, putc, ftell, rewind, fseek, fstat
     //
     //
-    // perf stats reading.
-    // perf stats writing.
-    // perf stats reading lines.
-    // perf stats writing lines.
     //
-    // perf stats compare streamers.
-    //  ifstream, iostream, C++ stream whatever
+    
+    //[x] resizing for input
+    //  need to seek, because the file ptr is in front.
     //
 
     //
-    // test bitstream writing
-    // test bitstream reading
+    //[ ] resizing for output
+    //  need to write the buffer, read the last page into the first page.
+    //  flush()
     //
-    
+
+    //
+    //  seek.
+    //      - read_mode
+    //      - write_mode
+    //
+
+    /*
+    fs_write()
+    fs_read()
+    fs_close()
+    fs_open()
+    fs_getc()
+    fs_putc()
+    fs_tell()
+    fs_seek()
+    fs_stat()
+*/
     START_TEST(stream, {});
-    
+    /*
     int fd = open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", O_RDONLY, S_IREAD);
     struct stat stats;
     int32_t status = fstat(fd, &stats);
@@ -62,7 +77,8 @@ int main()
     
     MEASURE_MS(stream, file_stream_8bytes, {
         int prev_loc = 0;
-        while(read_stream(8, fs) != NULL){
+        size_t expected = 8;
+        while(read_stream(fs, 8, &expected) != NULL){
             //printf("location %zu", fs->file_ptr);
             
         }
@@ -85,7 +101,8 @@ int main()
     
     MEASURE_MS(stream, file_stream_1byte, {
         int prev_loc = 0;
-        while(read_stream(1, fs) != NULL){
+        size_t expected = 1;
+        while(read_stream(fs, 1, &expected) != NULL){
             //printf("location %zu", fs->file_ptr);
             
         }
@@ -107,7 +124,7 @@ int main()
     fs = open_stream("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
     char* line = 0;
     MEASURE_MS(stream, file_stream_read_line, {
-    while(read_line_char(fs, &line))
+    while(read_line(fs, (void*)&line, ASCII))
     {
 
     }
@@ -117,17 +134,31 @@ int main()
     char lbuff[1024];
     f = fopen("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", "rb");
     MEASURE_MS(stream, file_read_line, {
-    while(read_line(f, lbuff, 1024))
+    while(file_read_line(f, lbuff, 1024))
     {
 
     }
     });
     fclose(f);
+    */
+    file_stream* fs = open_stream("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
+    file_stream *ofs = open_stream("out.obj", WRITE);
+    //size_t val =32;
+    //*write_stream(ofs, 0) = val;
+    
+    MEASURE_MS(stream, file_stream_write, {
+        size_t expected = 8;
+        uint8_t* buff = read_stream(fs, 8, &expected);
+        while(buff){
+            uint64_t* b = (uint64_t*)write_stream(ofs, expected);
+            *b = *(uint64_t*)buff;
+            buff = read_stream(fs, 8, &expected);
+        }
+        
+    });
+    close_stream(ofs);
+    close_stream(fs);
     END_TEST(stream, {});
 
-
-    //
-    // when reading small sizes from the file.
-    // raw access to the buffer
     return 0;
 }
