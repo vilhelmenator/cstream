@@ -1,4 +1,6 @@
 
+#include <signal.h>
+#include <execinfo.h>
 #include "cstream.h"
 
 #define CTEST_ENABLED
@@ -24,6 +26,17 @@ int file_read_line(FILE *fd, char *buff, size_t s)
     return 1;
 }
 
+void handler(int sig)
+{
+    void* array[100];
+    size_t size;
+
+    size = backtrace(array, 100);
+
+    fprintf(stderr, "error %d\n", sig);
+    backtrace_symbols_fd(array, size, STDERR_FILENO);
+    exit(1);
+}
 int main()
 {
     //
@@ -59,7 +72,9 @@ int main()
     fs_stat()
 */
     START_TEST(stream, {});
-    /*
+
+    signal(SIGSEGV, handler);
+    
     int fd = open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", O_RDONLY, S_IREAD);
     struct stat stats;
     int32_t status = fstat(fd, &stats);
@@ -73,7 +88,21 @@ int main()
     free(bu);
     close(fd);
 
+    
     file_stream *fs = open_stream("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
+    /*
+    MEASURE_MS(stream, file_stream_128bytes, {
+        int prev_loc = 0;
+        size_t expected = 128;
+        while(read_stream(fs, 128, &expected) != NULL){
+            //printf("location %zu", fs->file_ptr);
+            
+        }
+        
+    });
+    close_stream(fs);
+
+    fs = open_stream("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
     
     MEASURE_MS(stream, file_stream_8bytes, {
         int prev_loc = 0;
@@ -85,7 +114,6 @@ int main()
         
     });
 
-    
     close_stream(fs);
     char buff[8];
     FILE* f = fopen("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", "rb");
@@ -122,6 +150,7 @@ int main()
     
     
     fs = open_stream("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
+    */
     char* line = 0;
     MEASURE_MS(stream, file_stream_read_line, {
     while(read_line(fs, (void*)&line, ASCII))
@@ -130,7 +159,7 @@ int main()
     }
     });
     close_stream(fs);
-
+    /*
     char lbuff[1024];
     f = fopen("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", "rb");
     MEASURE_MS(stream, file_read_line, {
@@ -140,11 +169,9 @@ int main()
     }
     });
     fclose(f);
-    */
-    file_stream* fs = open_stream("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
+    
+    fs = open_stream("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
     file_stream *ofs = open_stream("out.obj", WRITE);
-    //size_t val =32;
-    //*write_stream(ofs, 0) = val;
     
     MEASURE_MS(stream, file_stream_write, {
         size_t expected = 8;
@@ -158,6 +185,7 @@ int main()
     });
     close_stream(ofs);
     close_stream(fs);
+    */
     END_TEST(stream, {});
 
     return 0;
