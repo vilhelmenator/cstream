@@ -1,5 +1,4 @@
 
-
 #pragma once
 
 #include <fcntl.h>
@@ -75,6 +74,7 @@ int dbg_read_line(FILE *fd, char *buff)
 
 void debug_step(const char *filename, int32_t linenr, const char *format, ...)
 {
+
 #if !defined(_MSC_VER)
     struct termios info;
     tcgetattr(0, &info); /* get current terminal attirbutes; 0 is the file descriptor for stdin */
@@ -83,9 +83,11 @@ void debug_step(const char *filename, int32_t linenr, const char *format, ...)
     info.c_cc[VTIME] = 0; /* no timeout */
     tcsetattr(0, TCSANOW, &info); /* set immediately */
 #endif
+
     va_list myargs;
     va_start(myargs, format);
     FILE *f = fopen(filename, "rb");
+
     char line[1024];
     char prebuff[1024];
     int32_t line_nr = 0;
@@ -177,9 +179,6 @@ static size_t sync_stream_read(file_stream *fs, size_t sm)
     /*
         Sync the stream and the internal buffer.
     */
-    if (fs->file_ptr == fs->file_size) {
-        return 0;
-    }
 
     size_t next_size = fs->buffer_size;
     ssize_t opres = 0;
@@ -289,12 +288,14 @@ file_stream *open_stream(const char *p, file_stream_mode mode)
     new_stream->buffer = (uint8_t *)malloc(new_stream->buffer_size);
     new_stream->buffer_ptr = 0;
     new_stream->file_ptr = 0;
+
     if (mode == READ) {
 
         struct stat stats;
         if (fstat(fd, &stats) == 0) {
             new_stream->file_size = stats.st_size;
         }
+
         ssize_t opres = 0;
         if ((opres = read(fd, new_stream->buffer, new_stream->buffer_size)) == -1) {
             return new_stream;
@@ -311,6 +312,7 @@ void flush_stream(file_stream *fs)
     if (fs->mode == READ) {
         return;
     }
+
     ssize_t opres = 0;
     if ((opres = write(fs->fd, fs->buffer, fs->buffer_ptr - fs->file_ptr)) == -1) {
         return;
@@ -331,31 +333,40 @@ void close_stream(file_stream *stream)
     }
 }
 
-uint8_t *read_stream(file_stream *fs, size_t expected, size_t *result)
+uint8_t *read_stream(file_stream *fs, size_t desired, size_t *result)
 {
     /*
         This acts more as an allocator then a copy based data stream.
         Hand you a pointer to the start of your data.
     */
-    if ((expected + fs->buffer_ptr) > fs->file_ptr) {
+
+    *result = desired;
+    if ((desired + fs->buffer_ptr) > fs->file_ptr) {
         /*
             Our buffer has reached its very end.
         */
-        if (sync_stream_read(fs, expected) == 0) {
-            return 0;
-        }
-    }
-    *result = expected;
-    size_t rem_size = fs->file_size - fs->buffer_ptr;
-    uint8_t *res = &fs->buffer[(fs->buffer_ptr + fs->buffer_size) - fs->file_ptr];
-    if (rem_size < expected) {
-        *result = rem_size;
-        if (rem_size == 0) {
-            return 0;
+        if (fs->file_ptr == fs->file_size) {
+
+            // We have nothing yet to read from the actual file on disk.
+            size_t rem_size = fs->file_size - fs->buffer_ptr;
+            if (rem_size < desired) {
+                // if there is something left to be fetched form the buffer
+                // we correct the desired size.
+                *result = rem_size;
+                if (rem_size == 0) {
+                    // well, we are completely empty
+                    return 0;
+                }
+            }
+        } else {
+            if (sync_stream_read(fs, desired) == 0) {
+                return 0;
+            }
         }
     }
 
     // otherwise, jsut grab the value from the buffer
+    uint8_t *res = &fs->buffer[(fs->buffer_ptr + fs->buffer_size) - fs->file_ptr];
     fs->buffer_ptr += *result;
     return res;
 }
@@ -404,55 +415,63 @@ static inline int is_eol(char c)
 size_t read_line(file_stream *fs, uint8_t **line_start, file_stream_type st)
 {
     char c;
-    char char_size = (size_t)st;
+    char char_size = (size_t)st; // supporting unicode line reading.
     size_t line_len = 0;
 
 n_entry:
 
+    // spin over all the initial new line entries. If there are one or more. Depending on the os.
     for (size_t i = (fs->buffer_ptr + fs->buffer_size) - fs->file_ptr; i < fs->buffer_size; i += char_size) {
+        // Cache our start position in the buffer.
         *line_start = &fs->buffer[i];
-        // otherwise, jsut grab the value from the buffer
         if (!is_eol(fs->buffer[i])) {
+            // we found something else but a new line. Jump to the second loop.
             goto c_entry;
         }
         fs->buffer_ptr += char_size;
     }
+    // We rolled passed the buffer end.
     // are we requesting data beyond the buffer size?
     if ((char_size + fs->buffer_ptr) > fs->file_ptr) {
         if (sync_stream_read(fs, char_size) == 0) {
             return 0;
         }
     }
+    // Our initial new line eating was inconclusive. Go back!
     goto n_entry;
 c_entry:
-
+    // spin over our buffer till we hit a new line.
     for (size_t i = (fs->buffer_ptr + fs->buffer_size) - fs->file_ptr; i < fs->buffer_size; i += char_size) {
 
         // otherwise, jsut grab the value from the buffer
         c = fs->buffer[i];
         if (is_eol(c)) {
+            // We finally found an end to the line.
             return line_len;
         }
         fs->buffer_ptr += char_size;
         line_len++;
     }
+    // We rolled passed the end of our buffer.
     // are we requesting data beyond the buffer size?
     if ((char_size + fs->buffer_ptr) > fs->file_ptr) {
         if (sync_stream_read(fs, char_size) == 0) {
             return line_len;
         }
     }
+    // keep working on that line.
     goto c_entry;
 }
 
 int32_t fs_tell(file_stream *fs)
 {
-    return fs->file_ptr;
+    return fs->buffer_ptr;
 }
 
 int32_t fs_seek(file_stream *fs, int32_t offset, int32_t whence)
 {
-    // if we move within our buffer.
+    // if we are reading... we move the file ptr.
+    // if we are writing... we move our buffer ptr.
 
     // move our place in the buffer.
     // what is our reletaive position?

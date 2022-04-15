@@ -90,7 +90,7 @@ int main()
 
     
     file_stream *fs = open_stream("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
-    /*
+    
     MEASURE_MS(stream, file_stream_128bytes, {
         int prev_loc = 0;
         size_t expected = 128;
@@ -150,7 +150,7 @@ int main()
     
     
     fs = open_stream("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
-    */
+    
     char* line = 0;
     MEASURE_MS(stream, file_stream_read_line, {
     while(read_line(fs, (void*)&line, ASCII))
@@ -159,7 +159,7 @@ int main()
     }
     });
     close_stream(fs);
-    /*
+    
     char lbuff[1024];
     f = fopen("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", "rb");
     MEASURE_MS(stream, file_read_line, {
@@ -177,15 +177,14 @@ int main()
         size_t expected = 8;
         uint8_t* buff = read_stream(fs, 8, &expected);
         while(buff){
-            uint64_t* b = (uint64_t*)write_stream(ofs, expected);
-            *b = *(uint64_t*)buff;
+            *(uint64_t*)write_stream(ofs, expected) = *(uint64_t*)buff;
             buff = read_stream(fs, 8, &expected);
         }
         
     });
     close_stream(ofs);
     close_stream(fs);
-    */
+    
     END_TEST(stream, {});
 
     return 0;
