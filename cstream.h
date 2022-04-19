@@ -3,12 +3,14 @@
 
 #include <fcntl.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <wchar.h>
 
 #if defined(_MSC_VER)
 #include <fcntl.h>
@@ -27,16 +29,18 @@ static inline int is_little_endian() { return (*(char *)&endian_test == 1); }
 
 #define next_page_multiple(s) ((s + (page_size - 1)) & ~(page_size - 1))
 #define prev_page_multiple(s) (s & ~(page_size - 1))
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
 
 typedef enum file_stream_mode_e {
-    READ = 0,
-    WRITE = 1,
-    APPEND = 2
+    READ = 1,
+    WRITE = 2,
+    APPEND = 4
 } file_stream_mode;
 
 typedef enum file_stream_type_e {
     ASCII = 1,
-    UNICODE = 2,
+    UNICODE_16 = 2,
+    UNICODE_32 = 4,
 } file_stream_type;
 
 typedef struct file_stream_t
@@ -48,10 +52,22 @@ typedef struct file_stream_t
     size_t file_ptr;
     // internal buffer data
     uint8_t *buffer;
-    uint32_t buffer_ptr;
-    uint32_t buffer_size;
+    size_t buffer_ptr;
+    size_t buffer_size;
     file_stream_mode mode;
+
 } file_stream;
+
+typedef struct bit_stream_t
+{
+    // file data
+    union
+    {
+        file_stream animal;
+    } base;
+    uint64_t mask;
+    uint64_t part;
+} bit_stream;
 
 int dbg_read_line(FILE *fd, char *buff)
 {
@@ -124,17 +140,8 @@ void debug_step(const char *filename, int32_t linenr, const char *format, ...)
         break;
     }
 }
-#define log_dgb(fmt, ...) debug_step(__FILE__, __LINE__, fmt, __VA_ARGS__);
 
-static ssize_t stream_op(file_stream *fs, void *src, size_t sm)
-{
-    switch (fs->mode) {
-    case READ:
-        return read(fs->fd, src, sm);
-    default:
-        return write(fs->fd, src, sm);
-    };
-}
+#define log_dgb(fmt, ...) debug_step(__FILE__, __LINE__, fmt, __VA_ARGS__);
 
 static void resize_buffer(file_stream *fs, size_t sm)
 {
@@ -156,7 +163,7 @@ static void resize_buffer(file_stream *fs, size_t sm)
     size_t tail = next_page_multiple(sm + fs->buffer_ptr);
     size_t span = tail - head;
     size_t start_offset = fs->buffer_ptr - head;
-    fs->buffer_ptr = start_offset;
+    fs->buffer_ptr = head;
 
     // if we need more space for our buffer
     if (span > fs->buffer_size) {
@@ -169,8 +176,8 @@ static void resize_buffer(file_stream *fs, size_t sm)
     // passed the end.
     if (start_offset > 0) {
         // rewind to our last page multiple
-        lseek(fs->fd, -fs->buffer_ptr, SEEK_CUR);
-        fs->file_ptr = -fs->buffer_ptr;
+        lseek(fs->fd, -page_size, SEEK_CUR);
+        fs->file_ptr -= page_size;
     }
 }
 
@@ -180,6 +187,9 @@ static size_t sync_stream_read(file_stream *fs, size_t sm)
         Sync the stream and the internal buffer.
     */
 
+    if (fs->file_ptr == fs->file_size) {
+        return 0;
+    }
     size_t next_size = fs->buffer_size;
     ssize_t opres = 0;
 
@@ -206,7 +216,7 @@ static size_t sync_stream_read(file_stream *fs, size_t sm)
         fs->buffer_size = next_size;
     }
     // stream the next batch
-    if ((opres = stream_op(fs, fs->buffer, next_size)) == -1) {
+    if ((opres = read(fs->fd, fs->buffer, next_size)) == -1) {
         return 0;
     }
 
@@ -222,8 +232,6 @@ static size_t sync_stream_write(file_stream *fs, size_t sm)
     */
 
     ssize_t opres = 0;
-    size_t next_size = fs->buffer_size;
-
     // flush our buffer
     if ((opres = write(fs->fd, fs->buffer, fs->buffer_ptr - fs->file_ptr)) == -1) {
         return 0;
@@ -258,8 +266,7 @@ static size_t sync_stream_write(file_stream *fs, size_t sm)
 
     return opres;
 }
-
-file_stream *open_stream(const char *p, file_stream_mode mode)
+static file_stream *create_stream(uint8_t stream_size, const char *p, file_stream_mode mode)
 {
     /*
         we use the buffer-less file IO. Because we are managing our own buffer.
@@ -279,7 +286,7 @@ file_stream *open_stream(const char *p, file_stream_mode mode)
     path_string[path_len - 1] = 0;
 
     // create our stream
-    file_stream *new_stream = (file_stream *)malloc(sizeof(file_stream));
+    file_stream *new_stream = (file_stream *)malloc(stream_size);
     new_stream->file_path = path_string;
     new_stream->fd = fd;
     new_stream->mode = mode;
@@ -288,28 +295,29 @@ file_stream *open_stream(const char *p, file_stream_mode mode)
     new_stream->buffer = (uint8_t *)malloc(new_stream->buffer_size);
     new_stream->buffer_ptr = 0;
     new_stream->file_ptr = 0;
-
-    if (mode == READ) {
-
-        struct stat stats;
-        if (fstat(fd, &stats) == 0) {
-            new_stream->file_size = stats.st_size;
+    new_stream->queue = (message_queue) { (uintptr_t)&empty_message, (uintptr_t)&empty_message };
+    struct stat stats;
+    if (fstat(fd, &stats) == 0) {
+        new_stream->file_size = stats.st_size;
+        if ((new_stream->file_size > 0) && (new_stream->file_size < new_stream->buffer_size)) {
+            new_stream->buffer_size = new_stream->file_size;
         }
-
-        ssize_t opres = 0;
-        if ((opres = read(fd, new_stream->buffer, new_stream->buffer_size)) == -1) {
-            return new_stream;
-        }
-        new_stream->buffer_size = opres;
-        new_stream->file_ptr = opres;
     }
 
     return new_stream;
 }
 
-void flush_stream(file_stream *fs)
+file_stream *fs_open(const char *p, file_stream_mode mode)
 {
-    if (fs->mode == READ) {
+    /*
+        Create a file streaming object
+    */
+    return create_stream(sizeof(file_stream), p, mode);
+}
+
+void fs_flush(file_stream *fs)
+{
+    if (fs->mode & READ) {
         return;
     }
 
@@ -324,7 +332,7 @@ void close_stream(file_stream *stream)
 {
     // release our buffer and file descriptor
     if (stream) {
-        flush_stream(stream);
+        fs_flush(stream);
         close(stream->fd);
         // release our heap stores
         free(stream->file_path);
@@ -333,7 +341,7 @@ void close_stream(file_stream *stream)
     }
 }
 
-uint8_t *read_stream(file_stream *fs, size_t desired, size_t *result)
+uint8_t *fs_read(file_stream *fs, size_t desired, size_t *result)
 {
     /*
         This acts more as an allocator then a copy based data stream.
@@ -371,7 +379,7 @@ uint8_t *read_stream(file_stream *fs, size_t desired, size_t *result)
     return res;
 }
 
-uint8_t *write_stream(file_stream *fs, size_t sm)
+uint8_t *fs_write(file_stream *fs, size_t sm)
 {
     /*
         This acts more as an allocator then a copy based data stream.
@@ -412,7 +420,7 @@ static inline int is_eol(char c)
     }
 }
 
-size_t read_line(file_stream *fs, uint8_t **line_start, file_stream_type st)
+size_t fs_read_line(file_stream *fs, uint8_t **line_start, file_stream_type st)
 {
     char c;
     char char_size = (size_t)st; // supporting unicode line reading.
@@ -463,54 +471,83 @@ c_entry:
     goto c_entry;
 }
 
-int32_t fs_tell(file_stream *fs)
+int64_t fs_tell(file_stream *fs)
 {
     return fs->buffer_ptr;
 }
 
-int32_t fs_seek(file_stream *fs, int32_t offset, int32_t whence)
+int64_t fs_seek(file_stream *fs, int32_t offset, int32_t whence)
 {
-    // if we are reading... we move the file ptr.
-    // if we are writing... we move our buffer ptr.
+    fs_flush(fs);
+    ssize_t opres = 0;
+    if ((opres = lseek(fs->fd, offset, whence)) == -1) {
+        return -1;
+    }
+    // if we jumped back to the beginning
+    if (opres == 0) {
+        // just reset and return
+        fs->file_ptr = 0;
+        fs->buffer_ptr = 0;
+        return 0;
+    }
+    size_t idx_offset = 0;
+    if (!(fs->mode & WRITE)) {
+        // if we jumped to the end
+        if (opres == (ssize_t)fs->file_size) {
+            // we have a fixed size if we are reading.
+            fs->file_ptr = opres;
+            fs->buffer_ptr = opres;
+            return opres;
+        }
+        offset = fs->buffer_size;
+    }
+    ssize_t next_buffer_pos = (opres + idx_offset) - fs->file_ptr;
 
-    // move our place in the buffer.
-    // what is our reletaive position?
-    // are we still within our buffer?
-    // if we are not within our buffer, we need to re-read the data to the buffer
-    // if we are reading. What happens.
-    //      - we re-sync our data.
-    // if we are writing. what happens.
-    //      - flush the current buffer to the file.
-    //      - read in the parts from where
-    //      - we re-sync our data.
-    return 0;
+    fs->buffer_ptr = opres;
+    if (next_buffer_pos >= 0 && next_buffer_pos < (ssize_t)fs->buffer_size) {
+        // we have moved but are still within our current buffer.
+        return opres;
+    }
+    if ((opres % page_size) == 0) {
+        fs->file_ptr = opres;
+        return opres;
+    }
+
+    //
+    size_t head = prev_page_multiple(opres);
+    if ((opres = lseek(fs->fd, head, SEEK_SET)) == -1) {
+        return -1;
+    }
+    fs->file_ptr = opres;
+    if ((opres = read(fs->fd, fs->buffer, fs->buffer_size)) == -1) {
+        return -1;
+    }
+    fs->buffer_size = opres;
+    if (fs->mode & READ) {
+        // move the file head
+        if ((opres = lseek(fs->fd, fs->buffer_size, SEEK_CUR)) == -1) {
+            return -1;
+        }
+        fs->file_ptr = opres;
+    }
+    return fs->buffer_ptr;
 }
 
-typedef struct bitstream_t
+bit_stream *bs_open(const char *p, file_stream_mode mode)
 {
-    file_stream *fs;
-    uint64_t mask;
-    uint64_t part;
-} bitstream;
-
-inline static bitstream new_bistream(const char *path, file_stream_mode mode)
-{
-    file_stream *fs = open_stream(path, mode);
-    return (bitstream) { fs, 0, 0 };
+    bit_stream *bs = (bit_stream *)create_stream(sizeof(bit_stream), p, mode);
+    bs->mask = 0;
+    bs->part = 0;
+    return bs;
 }
 
-inline static void close_bistream(bitstream *bs)
-{
-    close_stream(bs->fs);
-}
-
-uint8_t write_bitstream(bitstream *bs, int bit)
+uint8_t bs_write(bit_stream *bs, int bit)
 {
     if (bit)
         bs->part |= bs->mask;
     bs->mask = bs->mask >> 1;
     if (bs->mask == 0) {
-        *(uint64_t *)write_stream(bs->fs, sizeof(uint64_t)) = bs->part;
+        *(uint64_t *)fs_write((file_stream *)bs, sizeof(uint64_t)) = bs->part;
         bs->part = 0;
         bs->mask = partmask;
         return 1;
@@ -518,12 +555,12 @@ uint8_t write_bitstream(bitstream *bs, int bit)
     return 0;
 }
 
-uint32_t read_bistream(bitstream *bs)
+uint32_t bs_read(bit_stream *bs)
 {
     int result = 0;
     if (bs->mask == partmask) {
         size_t expected = 0;
-        bs->part = *(uint64_t *)read_stream(bs->fs, sizeof(uint64_t), &expected);
+        bs->part = *(uint64_t *)fs_read((file_stream *)bs, sizeof(uint64_t), &expected);
     }
     result = bs->part & bs->mask;
     bs->mask = bs->mask >> 1;
