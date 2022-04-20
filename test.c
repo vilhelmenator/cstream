@@ -60,7 +60,7 @@ int main()
     START_TEST(stream, {});
 
     signal(SIGSEGV, handler);
-    /*
+    
     int fd = open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", O_RDONLY, S_IREAD);
     struct stat stats;
     int32_t status = fstat(fd, &stats);
@@ -77,7 +77,6 @@ int main()
     
     file_stream *fs = fs_open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
     MEASURE_MS(stream, file_stream_128bytes, {
-        int prev_loc = 0;
         size_t expected = 128;
         while(fs_read(fs, 128, &expected) != NULL){
             //printf("location %zu", fs->file_ptr);
@@ -87,10 +86,20 @@ int main()
     close_stream(fs);
 
     fs = fs_open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
-    int prev_loc = 0;
     size_t expected = 8;
     MEASURE_MS(stream, file_stream_8bytes, {        
         while(fs_read(fs, 8, &expected) != NULL){
+            //printf("location %zu", fs->file_ptr);
+            
+        }
+        
+    });
+    close_stream(fs);
+
+    fs = fs_open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
+    expected = 6;
+    MEASURE_MS(stream, file_stream_6bytes, {        
+        while(fs_read(fs, 6, &expected) != NULL){
             //printf("location %zu", fs->file_ptr);
             
         }
@@ -154,8 +163,8 @@ int main()
     });
     fclose(f);
     
-    */
-    file_stream *fs = fs_open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
+    
+    fs = fs_open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
     file_stream *ofs = fs_open("out.obj", WRITE);
     
     MEASURE_MS(stream, file_stream_read_write, {
@@ -170,11 +179,10 @@ int main()
     close_stream(ofs);
     close_stream(fs);
     
-    int32_t fd = open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", O_RDONLY, S_IREAD);
-    struct stat stats;
-    int32_t status = fstat(fd, &stats);
+    fd = open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", O_RDONLY, S_IREAD);
+    status = fstat(fd, &stats);
     int32_t num_bytes = stats.st_size;
-    char* bu = (char*)malloc(num_bytes);
+    bu = (char*)malloc(num_bytes);
     read(fd, bu, num_bytes);
     close(fd);
 
@@ -188,13 +196,21 @@ int main()
     
 
     ofs = fs_open("out.obj", WRITE);
-    MEASURE_MS(stream, file_stream_write, {
+    MEASURE_MS(stream, file_stream_write8, {
         for(int i = 0; i < num_bytes; i+= 8){
             (*(uint64_t*)fs_write(ofs, 8)) = *(uint64_t*)(char*)(bu + i);
         } 
         close_stream(ofs);
     });
-    
+
+    ofs = fs_open("out.obj", WRITE);
+    MEASURE_MS(stream, file_stream_write6, {
+        for(int i = 0; i < num_bytes; i+= 6){
+            (*(uint64_t*)fs_write(ofs, 6)) = *(uint64_t*)(char*)(bu + i);
+        } 
+        close_stream(ofs);
+    });
+
     free(bu);
     //free(bu);
     //close(fd);
@@ -237,5 +253,18 @@ int main()
     // read/write small files.
     // read curropted text files.
     // compare input and output files. do they match.
+
+    //
+    // putc and string without null terminator
+    // convert values to strings.
+    // print string as raw values.
+    // outputs bytes to be formatted.
+    // print("name ", thing, "yeah",  )
+    //
+    // print(id, "biifb", {ptr,size}, int, int, float, {ptr, size})
+    // print("Ssiifs", string, string, int, int, float, string)
+    //
+    // int to string. float to string. const string.0, 
+    //
     return 0;
 }

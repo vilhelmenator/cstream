@@ -26,10 +26,115 @@ const static uint64_t alloc_size = page_size * 8;
 const static uint64_t partmask = 0x80000000000000;
 const static uint32_t endian_test = 1;
 static inline int is_little_endian() { return (*(char *)&endian_test == 1); }
-
+typedef int (*char_delim)(wchar_t *);
 #define next_page_multiple(s) ((s + (page_size - 1)) & ~(page_size - 1))
 #define prev_page_multiple(s) (s & ~(page_size - 1))
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
+
+static inline int is_eol_8(wchar_t *c)
+{
+    //
+    // null terminator C0 80 in some odd java unicode world
+    //
+    uint32_t c_value = (uint8_t)*c;
+
+    switch (c_value) {
+    case 0x00: /* term */
+    case 0x05: /*eof*/
+    case 0x0A: /*\n*/
+    case 0x0B:
+    case 0x0C:
+    case 0x0D: /*\r*/ {
+        return 1;
+    }
+
+    default:
+        return 0;
+    }
+}
+
+static inline int is_eol_16(wchar_t *c)
+{
+    //
+    // null terminator C0 80 in some odd java unicode world
+    //
+    uint32_t c_value = (uint16_t)*c;
+
+    switch (c_value) {
+    case 0x0000: /* term */
+    case 0xC080: /* modified utf8 */
+    case 0x80C0: /* modified utf8 */
+    case 0x0005: /*eof*/
+    case 0x000A: /*\n*/
+    case 0x000B: /*vertical tab */
+    case 0x000C: /*form feed */
+    case 0x000D: /*\r*/
+    case 0x0500: // big endian EOF ??
+    case 0x0A00:
+    case 0x0B00:
+    case 0x0C00:
+    case 0x0D00:
+        return 1;
+
+    default:
+        return 0;
+    };
+}
+
+static inline int is_eol_32(wchar_t *c)
+{
+    //
+    // null terminator C0 80 in some odd java unicode world
+    //
+    uint32_t c_value = (uint32_t)*c;
+
+    switch (c_value) {
+    case 0x00000000: /* term */
+    case 0x0000C080: /* modified utf8 */
+    case 0xC0800000: /* modified utf8 */
+    case 0x00000005: /*eof*/
+    case 0x0000000A: /*\n*/
+    case 0x0000000B: /*vertical tab */
+    case 0x0000000C: /*form feed */
+    case 0x0000000D: /*\r*/
+    case 0x05000000: // big endian EOF ??
+    case 0x0A000000:
+    case 0x0B000000:
+    case 0x0C000000:
+    case 0x0D000000:
+        return 1;
+
+    default:
+        return 0;
+    };
+}
+
+static inline int from_char_8(wchar_t *c)
+{
+    return (uint8_t)*c;
+}
+
+static inline int from_char_16(wchar_t *c)
+{
+    return (uint16_t)*c;
+}
+
+static inline int from_char_32(wchar_t *c)
+{
+    return (uint32_t)*c;
+}
+
+static inline int swap_16(wchar_t *c)
+{
+    uint32_t res = (uint16_t)*c;
+    return (0xff & res << 8) | (0xff & res >> 8);
+}
+
+static inline int swap_32(wchar_t *c)
+{
+    uint32_t res = (uint32_t)*c;
+    return (0xff & (res << 24)) | (0xff00 & (res << 8)) | (0xff0000 & (res >> 8)) | (0xff000000 & (res >> 24));
+}
 
 typedef enum file_stream_mode_e {
     READ = 1,
@@ -68,6 +173,40 @@ typedef struct bit_stream_t
     uint64_t mask;
     uint64_t part;
 } bit_stream;
+
+#define declare_delim(name, char_size, delim_cb)                                                                  \
+    size_t static name(file_stream *fs, uint8_t **line_start, int32_t delim_val)                                  \
+    {                                                                                                             \
+        size_t line_len = 0;                                                                                      \
+    n_entry:                                                                                                      \
+        for (size_t i = (fs->buffer_ptr + fs->buffer_size) - fs->file_ptr; i < fs->buffer_size; i += char_size) { \
+            *line_start = &fs->buffer[i];                                                                         \
+            if (delim_cb((wchar_t *)&fs->buffer[i]) == delim_val) {                                               \
+                goto c_entry;                                                                                     \
+            }                                                                                                     \
+            fs->buffer_ptr += char_size;                                                                          \
+        }                                                                                                         \
+        if ((char_size + fs->buffer_ptr) > fs->file_ptr) {                                                        \
+            if (sync_stream_read(fs, char_size) == 0) {                                                           \
+                return 0;                                                                                         \
+            }                                                                                                     \
+        }                                                                                                         \
+        goto n_entry;                                                                                             \
+    c_entry:                                                                                                      \
+        for (size_t i = (fs->buffer_ptr + fs->buffer_size) - fs->file_ptr; i < fs->buffer_size; i += char_size) { \
+            if (delim_cb((wchar_t *)&fs->buffer[i]) != delim_val) {                                               \
+                return line_len;                                                                                  \
+            }                                                                                                     \
+            fs->buffer_ptr += char_size;                                                                          \
+            line_len++;                                                                                           \
+        }                                                                                                         \
+        if ((char_size + fs->buffer_ptr) > fs->file_ptr) {                                                        \
+            if (sync_stream_read(fs, char_size) == 0) {                                                           \
+                return line_len;                                                                                  \
+            }                                                                                                     \
+        }                                                                                                         \
+        goto c_entry;                                                                                             \
+    }
 
 int dbg_read_line(FILE *fd, char *buff)
 {
@@ -295,7 +434,7 @@ static file_stream *create_stream(uint8_t stream_size, const char *p, file_strea
     new_stream->buffer = (uint8_t *)malloc(new_stream->buffer_size);
     new_stream->buffer_ptr = 0;
     new_stream->file_ptr = 0;
-    new_stream->queue = (message_queue) { (uintptr_t)&empty_message, (uintptr_t)&empty_message };
+
     struct stat stats;
     if (fstat(fd, &stats) == 0) {
         new_stream->file_size = stats.st_size;
@@ -400,75 +539,34 @@ uint8_t *fs_write(file_stream *fs, size_t sm)
     return res;
 }
 
-static inline int is_eol(char c)
+declare_delim(fs_read_line_8, 1, is_eol_8);
+declare_delim(fs_read_line_16, 2, is_eol_16);
+declare_delim(fs_read_line_32, 4, is_eol_32);
+size_t fs_read_line(file_stream *fs, uint8_t **line_start, file_stream_type st)
 {
-    //
-    // null terminator C0 80 in some odd java unicode world
-    //
-    switch (c) {
-    case 0x0:
-    case EOF:
-    case 0xA:
-    case 0xB:
-    case 0xC:
-    case 0xD: {
-        return 1;
-    }
-
+    switch (st) {
+    case ASCII:
+        return fs_read_line_8(fs, line_start, 1);
+    case UNICODE_16:
+        return fs_read_line_16(fs, line_start, 1);
     default:
-        return 0;
+        return fs_read_line_32(fs, line_start, 1);
     }
 }
 
-size_t fs_read_line(file_stream *fs, uint8_t **line_start, file_stream_type st)
+declare_delim(fs_get_delim_8, 1, from_char_8);
+declare_delim(fs_get_delim_16, 2, from_char_16);
+declare_delim(fs_get_delim_32, 4, from_char_32);
+size_t fs_get_delim(file_stream *fs, uint8_t **line_start, int32_t delim, file_stream_type st)
 {
-    char c;
-    char char_size = (size_t)st; // supporting unicode line reading.
-    size_t line_len = 0;
-
-n_entry:
-
-    // spin over all the initial new line entries. If there are one or more. Depending on the os.
-    for (size_t i = (fs->buffer_ptr + fs->buffer_size) - fs->file_ptr; i < fs->buffer_size; i += char_size) {
-        // Cache our start position in the buffer.
-        *line_start = &fs->buffer[i];
-        if (!is_eol(fs->buffer[i])) {
-            // we found something else but a new line. Jump to the second loop.
-            goto c_entry;
-        }
-        fs->buffer_ptr += char_size;
+    switch (st) {
+    case ASCII:
+        return fs_get_delim_8(fs, line_start, delim);
+    case UNICODE_16:
+        return fs_get_delim_16(fs, line_start, delim);
+    default:
+        return fs_get_delim_32(fs, line_start, delim);
     }
-    // We rolled passed the buffer end.
-    // are we requesting data beyond the buffer size?
-    if ((char_size + fs->buffer_ptr) > fs->file_ptr) {
-        if (sync_stream_read(fs, char_size) == 0) {
-            return 0;
-        }
-    }
-    // Our initial new line eating was inconclusive. Go back!
-    goto n_entry;
-c_entry:
-    // spin over our buffer till we hit a new line.
-    for (size_t i = (fs->buffer_ptr + fs->buffer_size) - fs->file_ptr; i < fs->buffer_size; i += char_size) {
-
-        // otherwise, jsut grab the value from the buffer
-        c = fs->buffer[i];
-        if (is_eol(c)) {
-            // We finally found an end to the line.
-            return line_len;
-        }
-        fs->buffer_ptr += char_size;
-        line_len++;
-    }
-    // We rolled passed the end of our buffer.
-    // are we requesting data beyond the buffer size?
-    if ((char_size + fs->buffer_ptr) > fs->file_ptr) {
-        if (sync_stream_read(fs, char_size) == 0) {
-            return line_len;
-        }
-    }
-    // keep working on that line.
-    goto c_entry;
 }
 
 int64_t fs_tell(file_stream *fs)
