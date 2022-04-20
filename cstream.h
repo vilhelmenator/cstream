@@ -31,11 +31,8 @@ typedef int (*char_delim)(wchar_t *);
 #define prev_page_multiple(s) (s & ~(page_size - 1))
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 
-static inline int is_eol_8(wchar_t *c)
+static inline int is_eol_8(uint8_t *c)
 {
-    //
-    // null terminator C0 80 in some odd java unicode world
-    //
     uint32_t c_value = (uint8_t)*c;
 
     switch (c_value) {
@@ -53,11 +50,8 @@ static inline int is_eol_8(wchar_t *c)
     }
 }
 
-static inline int is_eol_16(wchar_t *c)
+static inline int is_eol_16(uint8_t *c)
 {
-    //
-    // null terminator C0 80 in some odd java unicode world
-    //
     uint32_t c_value = (uint16_t)*c;
 
     switch (c_value) {
@@ -81,7 +75,7 @@ static inline int is_eol_16(wchar_t *c)
     };
 }
 
-static inline int is_eol_32(wchar_t *c)
+static inline int is_eol_32(uint8_t *c)
 {
     //
     // null terminator C0 80 in some odd java unicode world
@@ -109,28 +103,28 @@ static inline int is_eol_32(wchar_t *c)
     };
 }
 
-static inline int from_char_8(wchar_t *c)
+static inline int from_char_8(uint8_t *c)
 {
     return (uint8_t)*c;
 }
 
-static inline int from_char_16(wchar_t *c)
+static inline int from_char_16(uint8_t *c)
 {
     return (uint16_t)*c;
 }
 
-static inline int from_char_32(wchar_t *c)
+static inline int from_char_32(uint8_t *c)
 {
     return (uint32_t)*c;
 }
 
-static inline int swap_16(wchar_t *c)
+static inline int swap_16(uint8_t *c)
 {
     uint32_t res = (uint16_t)*c;
     return (0xff & res << 8) | (0xff & res >> 8);
 }
 
-static inline int swap_32(wchar_t *c)
+static inline int swap_32(uint8_t *c)
 {
     uint32_t res = (uint32_t)*c;
     return (0xff & (res << 24)) | (0xff00 & (res << 8)) | (0xff0000 & (res >> 8)) | (0xff000000 & (res >> 24));
@@ -181,7 +175,7 @@ typedef struct bit_stream_t
     n_entry:                                                                                                      \
         for (size_t i = (fs->buffer_ptr + fs->buffer_size) - fs->file_ptr; i < fs->buffer_size; i += char_size) { \
             *line_start = &fs->buffer[i];                                                                         \
-            if (delim_cb((wchar_t *)&fs->buffer[i]) == delim_val) {                                               \
+            if (delim_cb(&fs->buffer[i]) == delim_val) {                                                          \
                 goto c_entry;                                                                                     \
             }                                                                                                     \
             fs->buffer_ptr += char_size;                                                                          \
@@ -194,7 +188,7 @@ typedef struct bit_stream_t
         goto n_entry;                                                                                             \
     c_entry:                                                                                                      \
         for (size_t i = (fs->buffer_ptr + fs->buffer_size) - fs->file_ptr; i < fs->buffer_size; i += char_size) { \
-            if (delim_cb((wchar_t *)&fs->buffer[i]) != delim_val) {                                               \
+            if (delim_cb(&fs->buffer[i]) != delim_val) {                                                          \
                 return line_len;                                                                                  \
             }                                                                                                     \
             fs->buffer_ptr += char_size;                                                                          \

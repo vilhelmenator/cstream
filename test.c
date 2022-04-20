@@ -9,21 +9,7 @@
 
 int file_read_line(FILE *fd, char *buff, size_t s)
 {
-    char c;
-    int offset = 0;
-    do { // read one line
-        c = fgetc(fd);
-        if (c != EOF) {
-            if (offset < s) {
-                buff[offset++] = c;
-            }
-        }
-    } while (c != EOF && c != '\n');
-    buff[offset - 1] = 0;
-    if (c == EOF) {
-        return 0;
-    }
-    return 1;
+    return getline(&buff, &s, fd) != -1;
 }
 
 void handler(int sig)
@@ -39,24 +25,6 @@ void handler(int sig)
 }
 int main()
 {
-
-    //  seek.
-    //      - read_mode
-    //      - write_mode
-    //      - 
-    //
-
-/*
-    fs_write()
-    fs_read()
-    fs_close()
-    fs_open()
-    fs_getc()
-    fs_putc()
-    fs_tell()
-    fs_seek()
-    fs_stat()
-*/
     START_TEST(stream, {});
 
     signal(SIGSEGV, handler);
@@ -79,8 +47,6 @@ int main()
     MEASURE_MS(stream, file_stream_128bytes, {
         size_t expected = 128;
         while(fs_read(fs, 128, &expected) != NULL){
-            //printf("location %zu", fs->file_ptr);
-            
         }
     });
     close_stream(fs);
@@ -88,9 +54,7 @@ int main()
     fs = fs_open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
     size_t expected = 8;
     MEASURE_MS(stream, file_stream_8bytes, {        
-        while(fs_read(fs, 8, &expected) != NULL){
-            //printf("location %zu", fs->file_ptr);
-            
+        while(fs_read(fs, 8, &expected) != NULL){   
         }
         
     });
@@ -100,8 +64,6 @@ int main()
     expected = 6;
     MEASURE_MS(stream, file_stream_6bytes, {        
         while(fs_read(fs, 6, &expected) != NULL){
-            //printf("location %zu", fs->file_ptr);
-            
         }
         
     });
@@ -212,17 +174,6 @@ int main()
     });
 
     free(bu);
-    //free(bu);
-    //close(fd);
-
-    //fd = open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", O_RDONLY, S_IREAD);
-    //status = fstat(fd, &stats);
-    //num_bytes = stats.st_size;
-    //bu = (char*)malloc(num_bytes);
-    //read(fd, bu, num_bytes);
-    
-
-    
 
     fs = fs_open("utf8.txt", READ);
     wchar_t* wline = 0;
