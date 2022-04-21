@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <fcntl.h>
@@ -21,12 +20,69 @@
 #include <unistd.h>
 #endif
 
+void debug_step(const char *filename, int32_t linenr, const char *format, ...)
+{
+
+#if !defined(_MSC_VER)
+    struct termios info;
+    tcgetattr(0, &info); /* get current terminal attirbutes; 0 is the file descriptor for stdin */
+    info.c_lflag &= ~ICANON; /* disable canonical mode */
+    info.c_cc[VMIN] = 1; /* wait until at least one keystroke available */
+    info.c_cc[VTIME] = 0; /* no timeout */
+    tcsetattr(0, TCSANOW, &info); /* set immediately */
+#endif
+
+    va_list myargs;
+    va_start(myargs, format);
+    FILE *f = fopen(filename, "rb");
+
+    size_t line_size = 1024;
+    char line[1024];
+    char prebuff[1024];
+    char *line_ptr = &line[0];
+    int32_t line_nr = 0;
+    while (getline(&line_ptr, &line_size, f) != -1) {
+        line_nr++;
+        int32_t dist = abs(line_nr - linenr);
+        if (dist <= 3) {
+            if (dist == 0) {
+                //
+                //
+                int c = 0;
+                while (line[c] == ' ') {
+                    prebuff[c++] = ' ';
+                }
+                prebuff[c++] = '/';
+                prebuff[c++] = '/';
+                prebuff[c++] = ' ';
+                printf("%s", prebuff);
+                vprintf(format, myargs);
+            } else {
+                printf("%s\n", line);
+            }
+        }
+        if (line_nr > (linenr + 3)) {
+            break;
+        }
+    }
+    va_end(myargs);
+
+    switch (getchar()) {
+    case 27:
+        exit(1);
+    default:
+        break;
+    }
+}
+
+#define log_dgb(fmt, ...) debug_step(__FILE__, __LINE__, fmt, __VA_ARGS__);
+
 const static uint64_t page_size = 4096;
 const static uint64_t alloc_size = page_size * 8;
 const static uint64_t partmask = 0x80000000000000;
 const static uint32_t endian_test = 1;
 static inline int is_little_endian() { return (*(char *)&endian_test == 1); }
-typedef int (*char_delim)(wchar_t *);
+
 #define next_page_multiple(s) ((s + (page_size - 1)) & ~(page_size - 1))
 #define prev_page_multiple(s) (s & ~(page_size - 1))
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
@@ -56,8 +112,6 @@ static inline int is_eol_16(uint8_t *c)
 
     switch (c_value) {
     case 0x0000: /* term */
-    case 0xC080: /* modified utf8 */
-    case 0x80C0: /* modified utf8 */
     case 0x0005: /*eof*/
     case 0x000A: /*\n*/
     case 0x000B: /*vertical tab */
@@ -68,6 +122,8 @@ static inline int is_eol_16(uint8_t *c)
     case 0x0B00:
     case 0x0C00:
     case 0x0D00:
+    case 0xC080: /* modified utf8 */
+    case 0x80C0: /* modified utf8 */
         return 1;
 
     default:
@@ -84,13 +140,13 @@ static inline int is_eol_32(uint8_t *c)
 
     switch (c_value) {
     case 0x00000000: /* term */
-    case 0x0000C080: /* modified utf8 */
-    case 0xC0800000: /* modified utf8 */
     case 0x00000005: /*eof*/
     case 0x0000000A: /*\n*/
     case 0x0000000B: /*vertical tab */
     case 0x0000000C: /*form feed */
     case 0x0000000D: /*\r*/
+    case 0x0000C080: /* modified utf8 */
+    case 0xC0800000: /* modified utf8 */
     case 0x05000000: // big endian EOF ??
     case 0x0A000000:
     case 0x0B000000:
@@ -132,8 +188,7 @@ static inline int swap_32(uint8_t *c)
 
 typedef enum file_stream_mode_e {
     READ = 1,
-    WRITE = 2,
-    APPEND = 4
+    WRITE = 2
 } file_stream_mode;
 
 typedef enum file_stream_type_e {
@@ -146,7 +201,6 @@ typedef struct file_stream_t
 {
     // file data
     int32_t fd;
-    uint8_t *file_path;
     size_t file_size;
     size_t file_ptr;
     // internal buffer data
@@ -159,8 +213,7 @@ typedef struct file_stream_t
 
 typedef struct bit_stream_t
 {
-    // file data
-    union
+    union // C inheritance trick
     {
         file_stream animal;
     } base;
@@ -202,79 +255,127 @@ typedef struct bit_stream_t
         goto c_entry;                                                                                             \
     }
 
-int dbg_read_line(FILE *fd, char *buff)
+void fs_flush(file_stream *fs)
 {
-    char c;
-    int offset = 0;
-    do { // read one line
-        c = fgetc(fd);
-        if (c != EOF) {
-            if (offset < 1024) {
-                buff[offset++] = c;
-            }
-        }
-    } while (c != EOF && c != '\n');
-    if (c == EOF) {
+    if (fs->mode & READ) {
+        return;
+    }
+
+    ssize_t opres = 0;
+    if ((opres = write(fs->fd, fs->buffer, fs->buffer_ptr - fs->file_ptr)) == -1) {
+        return;
+    }
+    fs->file_ptr += opres;
+}
+
+int64_t fs_seek(file_stream *fs, int32_t offset, int32_t whence)
+{
+    fs_flush(fs);
+    ssize_t opres = 0;
+    if ((opres = lseek(fs->fd, offset, whence)) == -1) {
+        return -1;
+    }
+    // if we jumped back to the beginning
+    if (opres == 0) {
+        // just reset and return
+        fs->file_ptr = 0;
+        fs->buffer_ptr = 0;
         return 0;
     }
-    buff[offset - 1] = 0;
-    return 1;
+    size_t idx_offset = 0;
+    if (!(fs->mode & WRITE)) {
+        // if we jumped to the end
+        if (opres == (ssize_t)fs->file_size) {
+            // we have a fixed size if we are reading.
+            fs->file_ptr = opres;
+            fs->buffer_ptr = opres;
+            return opres;
+        }
+        offset = fs->buffer_size;
+    }
+    ssize_t next_buffer_pos = (opres + idx_offset) - fs->file_ptr;
+
+    fs->buffer_ptr = opres;
+    if (next_buffer_pos >= 0 && next_buffer_pos < (ssize_t)fs->buffer_size) {
+        // we have moved but are still within our current buffer.
+        return opres;
+    }
+    if ((opres % page_size) == 0) {
+        fs->file_ptr = opres;
+        return opres;
+    }
+
+    //
+    size_t head = prev_page_multiple(opres);
+    if ((opres = lseek(fs->fd, head, SEEK_SET)) == -1) {
+        return -1;
+    }
+    fs->file_ptr = opres;
+    if ((opres = read(fs->fd, fs->buffer, fs->buffer_size)) == -1) {
+        return -1;
+    }
+    fs->buffer_size = opres;
+    if (fs->mode & READ) {
+        // move the file head
+        if ((opres = lseek(fs->fd, fs->buffer_size, SEEK_CUR)) == -1) {
+            return -1;
+        }
+        fs->file_ptr = opres;
+    }
+    return fs->buffer_ptr;
 }
 
-void debug_step(const char *filename, int32_t linenr, const char *format, ...)
+static file_stream *create_stream(uint8_t stream_size, const char *p, file_stream_mode mode)
 {
+    /*
+        we use the buffer-less file IO. Because we are managing our own buffer.
+    */
+    int32_t fd = open(p, mode == READ ? O_RDONLY, S_IREAD : O_RDWR | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE);
+    if (fd == -1) {
+        // Well that did not work out so well.
+        return NULL;
+    }
 
-#if !defined(_MSC_VER)
-    struct termios info;
-    tcgetattr(0, &info); /* get current terminal attirbutes; 0 is the file descriptor for stdin */
-    info.c_lflag &= ~ICANON; /* disable canonical mode */
-    info.c_cc[VMIN] = 1; /* wait until at least one keystroke available */
-    info.c_cc[VTIME] = 0; /* no timeout */
-    tcsetattr(0, TCSANOW, &info); /* set immediately */
-#endif
+    // create our stream
+    file_stream *new_stream = (file_stream *)malloc(stream_size);
+    new_stream->fd = fd;
+    new_stream->mode = mode;
+    new_stream->buffer_size = alloc_size;
+    new_stream->file_size = page_size;
+    new_stream->buffer = (uint8_t *)malloc(new_stream->buffer_size);
+    new_stream->buffer_ptr = 0;
+    new_stream->file_ptr = 0;
 
-    va_list myargs;
-    va_start(myargs, format);
-    FILE *f = fopen(filename, "rb");
-
-    char line[1024];
-    char prebuff[1024];
-    int32_t line_nr = 0;
-    while (dbg_read_line(f, line)) {
-        line_nr++;
-        int32_t dist = abs(line_nr - linenr);
-        if (dist <= 3) {
-            if (dist == 0) {
-                //
-                //
-                int c = 0;
-                while (line[c] == ' ') {
-                    prebuff[c++] = ' ';
-                }
-                prebuff[c++] = '/';
-                prebuff[c++] = '/';
-                prebuff[c++] = ' ';
-                printf("%s", prebuff);
-                vprintf(format, myargs);
-            } else {
-                printf("%s\n", line);
-            }
-        }
-        if (line_nr > (linenr + 3)) {
-            break;
+    struct stat stats;
+    if (fstat(fd, &stats) == 0) {
+        new_stream->file_size = stats.st_size;
+        if ((new_stream->file_size > 0) && (new_stream->file_size < new_stream->buffer_size)) {
+            new_stream->buffer_size = new_stream->file_size;
         }
     }
-    va_end(myargs);
 
-    switch (getchar()) {
-    case 27:
-        exit(1);
-    default:
-        break;
-    }
+    return new_stream;
 }
 
-#define log_dgb(fmt, ...) debug_step(__FILE__, __LINE__, fmt, __VA_ARGS__);
+file_stream *fs_open(const char *p, file_stream_mode mode)
+{
+    /*
+        Create a file streaming object
+    */
+    return create_stream(sizeof(file_stream), p, mode);
+}
+
+void close_stream(file_stream *stream)
+{
+    // release our buffer and file descriptor
+    if (stream) {
+        fs_flush(stream);
+        close(stream->fd);
+        // release our heap stores
+        free(stream->buffer);
+        free(stream);
+    }
+}
 
 static void resize_buffer(file_stream *fs, size_t sm)
 {
@@ -399,80 +500,6 @@ static size_t sync_stream_write(file_stream *fs, size_t sm)
 
     return opres;
 }
-static file_stream *create_stream(uint8_t stream_size, const char *p, file_stream_mode mode)
-{
-    /*
-        we use the buffer-less file IO. Because we are managing our own buffer.
-    */
-    int32_t fd = open(p, mode == READ ? O_RDONLY, S_IREAD : O_RDWR | O_CREAT | O_TRUNC,
-        S_IREAD | S_IWRITE);
-
-    if (fd == -1) {
-        // Well that did not work out so well.
-        return NULL;
-    }
-
-    // copy our path string into the stream
-    uint32_t path_len = strlen(p) + 1;
-    uint8_t *path_string = (uint8_t *)malloc(path_len);
-    memcpy(path_string, p, path_len);
-    path_string[path_len - 1] = 0;
-
-    // create our stream
-    file_stream *new_stream = (file_stream *)malloc(stream_size);
-    new_stream->file_path = path_string;
-    new_stream->fd = fd;
-    new_stream->mode = mode;
-    new_stream->buffer_size = alloc_size;
-    new_stream->file_size = page_size;
-    new_stream->buffer = (uint8_t *)malloc(new_stream->buffer_size);
-    new_stream->buffer_ptr = 0;
-    new_stream->file_ptr = 0;
-
-    struct stat stats;
-    if (fstat(fd, &stats) == 0) {
-        new_stream->file_size = stats.st_size;
-        if ((new_stream->file_size > 0) && (new_stream->file_size < new_stream->buffer_size)) {
-            new_stream->buffer_size = new_stream->file_size;
-        }
-    }
-
-    return new_stream;
-}
-
-file_stream *fs_open(const char *p, file_stream_mode mode)
-{
-    /*
-        Create a file streaming object
-    */
-    return create_stream(sizeof(file_stream), p, mode);
-}
-
-void fs_flush(file_stream *fs)
-{
-    if (fs->mode & READ) {
-        return;
-    }
-
-    ssize_t opres = 0;
-    if ((opres = write(fs->fd, fs->buffer, fs->buffer_ptr - fs->file_ptr)) == -1) {
-        return;
-    }
-    fs->file_ptr += opres;
-}
-
-void close_stream(file_stream *stream)
-{
-    // release our buffer and file descriptor
-    if (stream) {
-        fs_flush(stream);
-        close(stream->fd);
-        // release our heap stores
-        free(stream->file_path);
-        free(stream->buffer);
-        free(stream);
-    }
-}
 
 uint8_t *fs_read(file_stream *fs, size_t desired, size_t *result)
 {
@@ -565,63 +592,6 @@ size_t fs_get_delim(file_stream *fs, uint8_t **line_start, int32_t delim, file_s
 
 int64_t fs_tell(file_stream *fs)
 {
-    return fs->buffer_ptr;
-}
-
-int64_t fs_seek(file_stream *fs, int32_t offset, int32_t whence)
-{
-    fs_flush(fs);
-    ssize_t opres = 0;
-    if ((opres = lseek(fs->fd, offset, whence)) == -1) {
-        return -1;
-    }
-    // if we jumped back to the beginning
-    if (opres == 0) {
-        // just reset and return
-        fs->file_ptr = 0;
-        fs->buffer_ptr = 0;
-        return 0;
-    }
-    size_t idx_offset = 0;
-    if (!(fs->mode & WRITE)) {
-        // if we jumped to the end
-        if (opres == (ssize_t)fs->file_size) {
-            // we have a fixed size if we are reading.
-            fs->file_ptr = opres;
-            fs->buffer_ptr = opres;
-            return opres;
-        }
-        offset = fs->buffer_size;
-    }
-    ssize_t next_buffer_pos = (opres + idx_offset) - fs->file_ptr;
-
-    fs->buffer_ptr = opres;
-    if (next_buffer_pos >= 0 && next_buffer_pos < (ssize_t)fs->buffer_size) {
-        // we have moved but are still within our current buffer.
-        return opres;
-    }
-    if ((opres % page_size) == 0) {
-        fs->file_ptr = opres;
-        return opres;
-    }
-
-    //
-    size_t head = prev_page_multiple(opres);
-    if ((opres = lseek(fs->fd, head, SEEK_SET)) == -1) {
-        return -1;
-    }
-    fs->file_ptr = opres;
-    if ((opres = read(fs->fd, fs->buffer, fs->buffer_size)) == -1) {
-        return -1;
-    }
-    fs->buffer_size = opres;
-    if (fs->mode & READ) {
-        // move the file head
-        if ((opres = lseek(fs->fd, fs->buffer_size, SEEK_CUR)) == -1) {
-            return -1;
-        }
-        fs->file_ptr = opres;
-    }
     return fs->buffer_ptr;
 }
 

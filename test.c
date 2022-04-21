@@ -23,10 +23,10 @@ void handler(int sig)
     backtrace_symbols_fd(array, size, STDERR_FILENO);
     exit(1);
 }
+
 int main()
 {
     START_TEST(stream, {});
-
     signal(SIGSEGV, handler);
     
     int fd = open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", O_RDONLY, S_IREAD);
@@ -184,38 +184,30 @@ int main()
         {
             line_len = fs_read_line(fs, (uint8_t**)&wline, UNICODE_16);
         }while(line_len != 0);
-        
-
     });
     close_stream(fs);
     END_TEST(stream, {});
 
-
     //
-    // read/write odd sizes, forcing the buffer to resize.
-    // read zero size files.
-    //  write into read modes
-    //  read from write modes.
-    //  append modes.
-    //  seek and tell.
-    //  jump between file positions.
-    //      - reset
-    // read/write lines.
-    // read/write small files.
-    // read curropted text files.
-    // compare input and output files. do they match.
-
-    //
-    // putc and string without null terminator
-    // convert values to strings.
-    // print string as raw values.
-    // outputs bytes to be formatted.
-    // print("name ", thing, "yeah",  )
-    //
-    // print(id, "biifb", {ptr,size}, int, int, float, {ptr, size})
-    // print("Ssiifs", string, string, int, int, float, string)
-    //
-    // int to string. float to string. const string.0, 
-    //
+    // [ ] read write odd sizes.
+    // [ ] read zero size files.
+    // [ ] reading writing sizes larger than buffer
+    // [ ] writing zero sizes.
+    // [ ] writing lines.
+    // [ ] seek while reading.
+    // [ ] seek while writing.
+    // [ ] test currupt text files.
+    // [ ] compare output files.
+    // [ ] reading small files.
+    // [ ] writing small files.
+    // [ ] compare perf of various streamers.
+    // [ ] character delimeter test.
+    // [ ] bit stream test.
+    // [ ] high level operations.
+    //      - read the whole file into a single large buffer.
+    //      - write a single large buffer into a file.
+    // [ ] run on windows
+    // done!
+    
     return 0;
 }
