@@ -1,10 +1,6 @@
-
-#include <signal.h>
-#include <execinfo.h>
+#define CTEST_ENABLED
 #include "cstream.h"
 
-#define CTEST_ENABLED
-#include "ctest/ctest.h"
 
 
 int file_read_line(FILE *fd, char *buff, size_t s)
@@ -12,22 +8,12 @@ int file_read_line(FILE *fd, char *buff, size_t s)
     return getline(&buff, &s, fd) != -1;
 }
 
-void handler(int sig)
-{
-    void* array[100];
-    size_t size;
 
-    size = backtrace(array, 100);
-
-    fprintf(stderr, "error %d\n", sig);
-    backtrace_symbols_fd(array, size, STDERR_FILENO);
-    exit(1);
-}
 
 int main()
 {
     START_TEST(stream, {});
-    signal(SIGSEGV, handler);
+    
     
     int fd = open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", O_RDONLY, S_IREAD);
     struct stat stats;
@@ -41,7 +27,6 @@ int main()
     });
     free(bu);
     close(fd);
-
     
     file_stream *fs = fs_open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", READ);
     MEASURE_MS(stream, file_stream_128bytes, {
@@ -189,9 +174,12 @@ int main()
     END_TEST(stream, {});
 
     //
+    // read 6 bytes at a time.
+    // see that the internals are being hit.
+    // 
     // [ ] read write odd sizes.
     // [ ] read zero size files.
-    // [ ] reading writing sizes larger than buffer
+    // [ ] reading writing sizes larger than buffer.
     // [ ] writing zero sizes.
     // [ ] writing lines.
     // [ ] seek while reading.
