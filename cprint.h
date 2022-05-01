@@ -1750,13 +1750,13 @@ static inline int32_t format_float_ex(exfloat w, char *buffer)
     return format_float_grisu(w, buffer);
 }
 
-int32_t format_float32(float w, char *buffer)
+int32_t format_float32(char *buffer, float w)
 {
     exfloat fw = float2exfloat(w);
     return format_float_ex(fw, buffer);
 }
 
-int32_t format_float64(double w, char *buffer)
+int32_t format_float64(char *buffer, double w)
 {
     exfloat dw = double2exfloat(w);
     return format_float_ex(dw, buffer);
@@ -1887,6 +1887,71 @@ size_t format_int64(char *buffer, int64_t c)
 size_t format_uint64(char *buffer, uint64_t c)
 {
     return format_int(buffer, c);
+}
+
+static int32_t str_to_int(char *buffer, int64_t *out, size_t max_digits)
+{
+    // eat up any whitespace
+    while (*buffer == ' ') {
+        buffer++;
+    }
+    *out = 0;
+
+    int32_t num_chars = 0;
+    for (int32_t i = 0; i < max_digits; i++) {
+        int32_t delta = (int32_t)*buffer - (int32_t)'0';
+        while (delta >= 0 && delta < 10) {
+            int32_t val = (int32_t)*buffer;
+            *out = (*out * 10) + val;
+            val = (int32_t) * ++buffer;
+            delta = val - (int32_t)'0';
+            num_chars++;
+        }
+    }
+
+    if (num_chars == 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int32_t str_to_flt(char *buffer, float *out)
+{
+    /*
+    //
+    // TODO
+    // eat up any whitespace
+    //
+    while (*buffer == ' ') {
+        buffer++;
+    }
+    *out = 0;
+
+    // read exponent
+    // -num . num e - num
+    int32_t num_chars = 0;
+    for (int32_t i = 0; i < 21; i++) {
+        int32_t delta = (int32_t)*buffer - (int32_t)'0';
+        while (delta >= 0 && delta < 10) {
+            int32_t val = (int32_t)*buffer;
+            *out = (*out * 10) + val;
+            val = (int32_t) * ++buffer;
+            delta = val - (int32_t)'0';
+            num_chars++;
+        }
+    }
+
+    if (num_chars == 0) {
+        return -1;
+    }
+    return 0;
+    */
+    return -1;
+}
+
+int32_t str_to_int8(char *buffer, int8_t *out)
+{
+    return str_to_int(buffer, (int64_t *)out, max_digit_num[56]);
 }
 
 #endif //_CPRINT_H
