@@ -517,7 +517,10 @@ static size_t sync_stream_write(file_stream *fs, size_t sm)
 
     return opres;
 }
+/*
 
+*/
+// unit test branch labels.
 #define fs_read_fill_buffer __LINE__
 #define fs_read_failed_to_fill_buffer __LINE__
 #define fs_read_file_exhausted __LINE__
@@ -529,7 +532,7 @@ uint8_t *fs_read(file_stream *fs, size_t desired, size_t *result)
         This acts more as an allocator then a copy based data stream.
         Hand you a pointer to the start of your data.
     */
-
+    uint8_t *res = NULL;
     *result = desired;
     if ((desired + fs->buffer_ptr) > fs->file_ptr) {
         log_define(_CSTREAM_H, fs_read_fill_buffer);
@@ -560,7 +563,7 @@ uint8_t *fs_read(file_stream *fs, size_t desired, size_t *result)
     }
 
     // otherwise, jsut grab the value from the buffer
-    uint8_t *res = &fs->buffer[(fs->buffer_ptr + fs->buffer_size) - fs->file_ptr];
+    res = &fs->buffer[(fs->buffer_ptr + fs->buffer_size) - fs->file_ptr];
     fs->buffer_ptr += *result;
     return res;
 }
