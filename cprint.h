@@ -1982,7 +1982,7 @@ static int32_t str_to_int(char *buffer, int64_t *out, size_t max_digits)
     return 0;
 }
 
-static int32_t str_to_flt(char *buffer, float *out)
+static int32_t str_to_exfloat(char *buffer, exfloat *out)
 {
     int32_t sign = prelude(&buffer);
     int32_t esign = 1;
@@ -2032,7 +2032,7 @@ static int32_t str_to_flt(char *buffer, float *out)
     } while (1);
 gen_float:
     if (fractional_val == 0) {
-        *out = 0;
+        *out = (exfloat) { 0, 0, 0 };
         return 0;
     }
     if (comma_pos >= 0) {
@@ -2048,9 +2048,29 @@ gen_float:
         D.e -= 1;
     }
 
-    *out = exfloat2float(D);
+    *out = D;
     return 0;
 err:
+    return -1;
+}
+
+static int32_t str_to_float(char *buffer, float *out)
+{
+    exfloat exval;
+    if (str_to_exfloat(buffer, &exval) == 0) {
+        *out = exfloat2float(exval);
+        return 0;
+    }
+    return -1;
+}
+
+static int32_t str_to_double(char *buffer, double *out)
+{
+    exfloat exval;
+    if (str_to_exfloat(buffer, &exval) == 0) {
+        *out = exfloat2double(exval);
+        return 0;
+    }
     return -1;
 }
 

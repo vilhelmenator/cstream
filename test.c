@@ -716,23 +716,15 @@ int main()
     buffA[offset] = 0;
     printf("%s", buffA);
     float outy = 0.0f;
-    str_to_flt("0.1e-1", &outy);
+    str_to_float("0.1e-1", &outy);
     printf("%e\n", outy);
 
 
-    printf("%d\n", (int)'\0');
-    printf("%d\n", (int)' ');
-    printf("%d\n", (int)',');
-    printf("%d\n", (int)'.');
-    printf("%d\n", (int)'E');
-    printf("%d\n", (int)'e');
-    
-            
     MEASURE_MS(stream, str_to_flt, {
         for(int i = 0; i < 10000000; i++)
         {
-            float d = 0.0;
-            str_to_flt("0.0101e-13", &d);
+            double d = 0.0;
+            str_to_double("0.0101e-13", &d);
             accum++;
         }
     });
