@@ -1487,7 +1487,8 @@ start:
     case 0:
         break;
     case 1:
-        *--output = *(int8_t *)&digits[value * 4] + 3;
+        num_str = (int8_t *)&digits[value * 4] + 3;
+        *--output = num_str[0];
         break;
     case 2:
         num_str = (int8_t *)&digits[value * 4] + 2;
@@ -1605,11 +1606,53 @@ static inline int k_comp(int e, int alpha, int gamma)
     return ceil((alpha - e + 63) * D_1_LOG2_10);
 }
 
+static exfloat exfloat_construct(uint64_t f, int32_t e, int8_t s)
+{
+    exfloat fp;
+
+    int32_t shift = __builtin_clzll(1 | f);
+    fp.e = power10_lookup[e + power10_zero_offset].e + 63 - shift;
+    fp.f = f << shift;
+    fp.s = s;
+    return fp;
+}
+
+static float exfloat2float(exfloat exf)
+{
+    const int32_t bits_diff = 64 - 24;
+    int32_t e = exf.e;
+    uint64_t f = exf.f;
+    f >>= (bits_diff);
+    e += (bits_diff) + 23 + 127;
+    e = e & 0xff;
+    e = (e << 23) | (0x7fffff & f);
+    if (exf.s) {
+        e = e | 0x80000000;
+    }
+    return *(float *)&e;
+}
+
+static double exfloat2double(exfloat exf)
+{
+    const int32_t bits_diff = 64 - 53;
+    uint64_t e = exf.e;
+    uint64_t f = exf.f;
+    f >>= bits_diff;
+    e += bits_diff + 52 + 1023;
+    e = e & 0x7ff;
+    f = e << 52 | (0xfffffffffffff & f);
+    if (exf.s) {
+        f = f | 0x8000000000000000;
+    }
+    return *(double *)&f;
+}
+
 static inline exfloat multiply_exfloat(exfloat *x, exfloat *y)
 {
     exfloat r;
     r.f = mulhiu64(y->f, x->f) + 1;
     r.e = x->e + y->e + 64;
+    r.s = x->s * y->s;
     return r;
 }
 #define TEN7 10000000
@@ -1889,63 +1932,125 @@ size_t format_uint64(char *buffer, uint64_t c)
     return format_int(buffer, c);
 }
 
-static int32_t str_to_int(char *buffer, int64_t *out, size_t max_digits)
+static inline int32_t isnum(int8_t ch)
+{
+    int32_t delta = ch - (int32_t)'0';
+    if (delta >= 0 && delta < 10) {
+        return 1;
+    }
+    return 0;
+}
+
+static inline int prelude(char **buffer)
 {
     // eat up any whitespace
-    while (*buffer == ' ') {
-        buffer++;
+    while (**buffer == ' ') {
+        (*buffer)++;
     }
-    *out = 0;
+    if (**buffer == '-') {
+        (*buffer)++;
+        return -1;
+    } else if (**buffer == '+') {
+        (*buffer)++;
+    }
+    return 1;
+}
 
+static int32_t str_to_int(char *buffer, int64_t *out, size_t max_digits)
+{
+    int32_t sign = prelude(&buffer);
+    int64_t out_val = 0;
     int32_t num_chars = 0;
+    char ch = *buffer;
     for (int32_t i = 0; i < max_digits; i++) {
-        int32_t delta = (int32_t)*buffer - (int32_t)'0';
-        while (delta >= 0 && delta < 10) {
-            int32_t val = (int32_t)*buffer;
-            *out = (*out * 10) + val;
-            val = (int32_t) * ++buffer;
-            delta = val - (int32_t)'0';
+        if (isnum(ch)) {
+            int32_t val = ch - (int32_t)'0';
+            out_val = (out_val * 10) + val;
+            ch = *++buffer;
             num_chars++;
+
+        } else {
+            break;
         }
     }
 
     if (num_chars == 0) {
         return -1;
     }
+    out_val *= sign;
+    *out = out_val;
     return 0;
 }
 
 static int32_t str_to_flt(char *buffer, float *out)
 {
-    /*
-    //
-    // TODO
-    // eat up any whitespace
-    //
-    while (*buffer == ' ') {
-        buffer++;
-    }
-    *out = 0;
+    int32_t sign = prelude(&buffer);
+    int32_t esign = 1;
+    int32_t comma_pos = -1;
+    char ch = *buffer;
 
-    // read exponent
-    // -num . num e - num
-    int32_t num_chars = 0;
-    for (int32_t i = 0; i < 21; i++) {
-        int32_t delta = (int32_t)*buffer - (int32_t)'0';
-        while (delta >= 0 && delta < 10) {
-            int32_t val = (int32_t)*buffer;
-            *out = (*out * 10) + val;
-            val = (int32_t) * ++buffer;
-            delta = val - (int32_t)'0';
-            num_chars++;
+    int32_t num_f_chars_read = 0;
+    int32_t num_e_chars_read = 0;
+    uint64_t fractional_val = 0;
+    uint64_t exponent_val = 0;
+
+    uint64_t *currentval = &fractional_val;
+    int32_t *curren_count = &num_f_chars_read;
+    exfloat exval;
+    do {
+        if (isnum(ch)) {
+            int32_t val = ch - (int32_t)'0';
+            *currentval = (*currentval * 10) + val;
+            (*curren_count)++;
+        } else {
+            switch (ch) {
+            case '\0':
+            case ' ':
+                goto gen_float;
+            case '.':
+            case ',': {
+                if (comma_pos > 0) {
+                    goto err;
+                }
+                comma_pos = *curren_count;
+                break;
+            }
+            case 'E':
+            case 'e': {
+                currentval = &exponent_val;
+                curren_count = &num_e_chars_read;
+                esign = prelude(&buffer);
+                break;
+            }
+
+            default:
+                goto err;
+            }
         }
+
+        ch = *++buffer;
+    } while (1);
+gen_float:
+    if (fractional_val == 0) {
+        *out = 0;
+        return 0;
+    }
+    if (comma_pos >= 0) {
+        exponent_val -= (num_f_chars_read - comma_pos) * esign;
+    }
+    exval = exfloat_construct(fractional_val, 0, sign == -1);
+    exfloat c_mk = power10_lookup[exponent_val + power10_zero_offset];
+    exfloat D = multiply_exfloat(&exval, &c_mk);
+
+    // normalize the results.
+    while (!(D.f & 0x8000000000000000)) {
+        D.f <<= 1;
+        D.e -= 1;
     }
 
-    if (num_chars == 0) {
-        return -1;
-    }
+    *out = exfloat2float(D);
     return 0;
-    */
+err:
     return -1;
 }
 

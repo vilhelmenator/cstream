@@ -668,13 +668,42 @@ int main()
         count += c;
     }
     */
+    
     char buffA[1024];
     char buffB[1024];
     int max = 0;
     int count = 0;
     int accum = 0;
-    /*
 
+    //----
+    // test writing a buffer
+    // test writing a string
+    // test writing a reference
+    // test writing a binary
+    // test reading a binary 
+    // test reading a text into binary
+    //  - finish the int reading, hex reading and float reading.
+    //-----
+    // finish the streaming module
+    //  - debugging module.
+    //  - print compositor. [format strings into one large buffer for display.]
+    //  - unit tests and seek.
+    //  - high level functions.
+    // printf wide characters
+    //  - just some simpel awareness.
+    //-----
+    // play with the compression
+    //  - learning about compression
+    // ----
+    // finish the allocator
+    //  - the same ol... threadding additoins.
+    // ---
+    // finish the lump builder additions.
+    //  - new tests and integratins of new juices.
+    // adjust the thread pool.
+    // upgrade allot library
+    // cbuilder dev
+    //
     struct local_args
     {
         double d;
@@ -682,14 +711,39 @@ int main()
         int a;
     };
     struct local_args arguments = {2.0, 2.0, 2323};
-    var_args arg = {"%f%d%i", &arguments};
-    
-    uint64_t var = 18446744073709551615U;
+    var_args arg = {"%f %f %i\n", &arguments};
     int32_t offset = cprintf(buffA, 1024, &arg);
     buffA[offset] = 0;
     printf("%s", buffA);
-    */
+    float outy = 0.0f;
+    str_to_flt("0.1e-1", &outy);
+    printf("%e\n", outy);
+
+
+    printf("%d\n", (int)'\0');
+    printf("%d\n", (int)' ');
+    printf("%d\n", (int)',');
+    printf("%d\n", (int)'.');
+    printf("%d\n", (int)'E');
+    printf("%d\n", (int)'e');
     
+            
+    MEASURE_MS(stream, str_to_flt, {
+        for(int i = 0; i < 10000000; i++)
+        {
+            float d = 0.0;
+            str_to_flt("0.0101e-13", &d);
+            accum++;
+        }
+    });
+    char* end;
+    MEASURE_MS(stream, strtod, {
+        for(int i = 0; i < 10000000; i++)
+        {
+            double d = strtod("0.0101e-13", &end);
+            accum++;
+        }
+    });
     MEASURE_MS(stream, format_float_, {
         for(int i = 0; i < 10000000; i++)
         {
@@ -737,6 +791,7 @@ int main()
             count++;
         }
     });
+    
     */
     /*
     int fd = open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", O_RDONLY, S_IREAD);
