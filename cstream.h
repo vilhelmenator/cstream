@@ -12,15 +12,6 @@
 #include <sys/types.h>
 #include <wchar.h>
 
-#if defined(_MSC_VER)
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#else
-#include <termios.h>
-#include <unistd.h>
-#endif
-
 #include "../ctest/ctest.h"
 CLOGGER(_CSTREAM_H, 4096)
 
