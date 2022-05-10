@@ -1,6 +1,133 @@
 #define CTEST_ENABLED
 #include "cstream.h"
 
+#if defined(WINDOWS)
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#else
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <unistd.h>
+#endif
+
+void clearScreen()
+{
+    write(STDOUT_FILENO,"\x1b[?25l", 6);
+    write(STDOUT_FILENO,"\x1b[H", 3);
+}
+
+int getCursorPosition(int *rows, int *cols)
+{
+    char buf[32];
+    unsigned int i = 0;
+    if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4)
+        return -1;
+    while (i < sizeof(buf) - 1) {
+        if (read(STDIN_FILENO, &buf[i], 1) != 1)
+            break;
+        if (buf[i] == 'R')
+            break;
+        i++;
+    }
+    buf[i] = '\0';
+    if (buf[0] != '\x1b' || buf[1] != '[')
+        return -1;
+    if (sscanf(&buf[2], "%d;%d", rows, cols) != 2)
+        return -1;
+    return 0;
+}
+
+int getWindowSize(int *rows, int *cols)
+{
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
+        if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12)
+            return -1;
+        return getCursorPosition(rows, cols);
+    } else {
+        *cols = ws.ws_col;
+        *rows = ws.ws_row;
+        return 0;
+    }
+}
+
+int32_t debug_step(const char *filename, int32_t linenr, char *format, ...)
+{
+#if !defined(_MSC_VER)
+    struct termios orig_termios;
+    tcgetattr(STDIN_FILENO, &orig_termios);
+    struct termios raw_term = orig_termios;
+    raw_term.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    raw_term.c_cflag |= (CS8);
+    raw_term.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+    raw_term.c_cc[VMIN] = 1; // wait until at least one keystroke available
+    raw_term.c_cc[VTIME] = 0; // no timeout
+    tcsetattr(0, TCSANOW, &raw_term); // set immediately
+#endif
+
+    va_list myargs;
+    va_start(myargs, format);
+    FILE *f = fopen(filename, "r");
+
+    size_t line_size = 1024;
+    char line[1024];
+    char prebuff[1024];
+    char *line_ptr = &line[0];
+    int32_t line_nr = 0;
+    //clearScreen();
+    printf("\n\x1b[48;5;239m");
+    printf("%s : %d\n", filename, linenr);
+    vprintf(format, myargs);
+    printf("\x1b[48;5;0m\n");
+
+    while (getline(&line_ptr, &line_size, f) != -1) {
+        line_nr++;
+        int32_t dist = abs(line_nr - linenr);
+        if (dist <= 8) {
+            if (dist == 0) {
+                printf("\x1b[48;5;239m");
+                printf("->");
+                printf("\x1b[48;5;0m");
+            }
+            printf("%s", line);
+        }
+        if (line_nr > (linenr + 3)) {
+            break;
+        }
+    }
+    va_end(myargs);
+    char c = getchar();
+#if !defined(_MSC_VER)
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+#endif
+    switch (c) {
+    case 27: {
+        exit(1);
+    }
+    default:
+        break;
+    }
+    return 0;
+}
+
+void signal_handler(int sig)
+{
+    void *array[100];
+    size_t size;
+
+    size = backtrace(array, 100);
+
+    fprintf(stderr, "error %d\n", sig);
+    backtrace_symbols_fd(array, size, STDERR_FILENO);
+    exit(1);
+}
+#define DEBUG_INIT()\
+    do{\
+            signal(SIGSEGV, signal_handler);\
+            CLOGGER_SET_CALLBACK(_CSTREAM_H, debug_step);\
+    }while(0)
+
 int file_read_line(FILE *fd, char *buff, size_t s)
 {
     return getline(&buff, &s, fd) != -1;
@@ -8,7 +135,8 @@ int file_read_line(FILE *fd, char *buff, size_t s)
 
 int main()
 {
-    
+    DEBUG_INIT();
+    // figure out the addresses of all the labels.
     START_TEST(stream, {});
     
     int fd = open("//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj", O_RDONLY, S_IREAD);
