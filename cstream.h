@@ -88,20 +88,11 @@ static inline int is_eol_32(uint8_t *c)
     };
 }
 
-static inline int from_char_8(uint8_t *c)
-{
-    return (uint8_t)*c;
-}
+static inline int from_char_8(uint8_t *c) { return (uint8_t)*c; }
 
-static inline int from_char_16(uint8_t *c)
-{
-    return (uint16_t)*c;
-}
+static inline int from_char_16(uint8_t *c) { return (uint16_t)*c; }
 
-static inline int from_char_32(uint8_t *c)
-{
-    return (uint32_t)*c;
-}
+static inline int from_char_32(uint8_t *c) { return (uint32_t)*c; }
 
 static inline int swap_16(uint8_t *c)
 {
@@ -112,13 +103,11 @@ static inline int swap_16(uint8_t *c)
 static inline int swap_32(uint8_t *c)
 {
     uint32_t res = (uint32_t)*c;
-    return (0xff & (res << 24)) | (0xff00 & (res << 8)) | (0xff0000 & (res >> 8)) | (0xff000000 & (res >> 24));
+    return (0xff & (res << 24)) | (0xff00 & (res << 8)) |
+           (0xff0000 & (res >> 8)) | (0xff000000 & (res >> 24));
 }
 
-typedef enum file_stream_mode_e {
-    READ = 1,
-    WRITE = 2
-} file_stream_mode;
+typedef enum file_stream_mode_e { READ = 1, WRITE = 2 } file_stream_mode;
 
 typedef enum file_stream_type_e {
     ASCII = 1,
@@ -150,44 +139,51 @@ typedef struct bit_stream_t
     uint64_t part;
 } bit_stream;
 
-#define declare_delim(name, char_size, delim_cb)                                                                  \
-    size_t static name(file_stream *fs, uint8_t **line_start, int32_t delim_val)                                  \
-    {                                                                                                             \
-        size_t line_len = 0;                                                                                      \
-    n_entry:                                                                                                      \
-        for (size_t i = (fs->buffer_ptr + fs->buffer_size) - fs->file_ptr; i < fs->buffer_size; i += char_size) { \
-            *line_start = &fs->buffer[i];                                                                         \
-            if (delim_cb(&fs->buffer[i]) == delim_val) {                                                          \
-                log_define(_CSTREAM_H, declare_delim_found_nl_at_start, "", 0);                                   \
-                goto c_entry;                                                                                     \
-            }                                                                                                     \
-            fs->buffer_ptr += char_size;                                                                          \
-        }                                                                                                         \
-        if ((char_size + fs->buffer_ptr) > fs->file_ptr) {                                                        \
-            if (sync_stream_read(fs, char_size) == 0) {                                                           \
-                log_define(_CSTREAM_H, declare_delim_failed_sync_at_start, "", 0);                                \
-                return 0;                                                                                         \
-            }                                                                                                     \
-            log_define(_CSTREAM_H, declare_delim_success_sync_at_start, "", 0);                                   \
-        }                                                                                                         \
-        goto n_entry;                                                                                             \
-    c_entry:                                                                                                      \
-        for (size_t i = (fs->buffer_ptr + fs->buffer_size) - fs->file_ptr; i < fs->buffer_size; i += char_size) { \
-            if (delim_cb(&fs->buffer[i]) != delim_val) {                                                          \
-                log_define(_CSTREAM_H, declare_delim_found_nl_at_end, "", 0);                                     \
-                return line_len;                                                                                  \
-            }                                                                                                     \
-            fs->buffer_ptr += char_size;                                                                          \
-            line_len++;                                                                                           \
-        }                                                                                                         \
-        if ((char_size + fs->buffer_ptr) > fs->file_ptr) {                                                        \
-            if (sync_stream_read(fs, char_size) == 0) {                                                           \
-                log_define(_CSTREAM_H, declare_delim_failed_sync_at_end, "", 0);                                  \
-                return line_len;                                                                                  \
-            }                                                                                                     \
-            log_define(_CSTREAM_H, declare_delim_success_sync_at_end, "", 0);                                     \
-        }                                                                                                         \
-        goto c_entry;                                                                                             \
+#define declare_delim(name, char_size, delim_cb)                               \
+    size_t static name(file_stream *fs, uint8_t **line_start,                  \
+                       int32_t delim_val)                                      \
+    {                                                                          \
+        size_t line_len = 0;                                                   \
+    n_entry:                                                                   \
+        for (size_t i = (fs->buffer_ptr + fs->buffer_size) - fs->file_ptr;     \
+             i < fs->buffer_size; i += char_size) {                            \
+            *line_start = &fs->buffer[i];                                      \
+            if (delim_cb(&fs->buffer[i]) == delim_val) {                       \
+                log_define(_CSTREAM_H, declare_delim_found_nl_at_start, "",    \
+                           0);                                                 \
+                goto c_entry;                                                  \
+            }                                                                  \
+            fs->buffer_ptr += char_size;                                       \
+        }                                                                      \
+        if ((char_size + fs->buffer_ptr) > fs->file_ptr) {                     \
+            if (sync_stream_read(fs, char_size) == 0) {                        \
+                log_define(_CSTREAM_H, declare_delim_failed_sync_at_start, "", \
+                           0);                                                 \
+                return 0;                                                      \
+            }                                                                  \
+            log_define(_CSTREAM_H, declare_delim_success_sync_at_start, "",    \
+                       0);                                                     \
+        }                                                                      \
+        goto n_entry;                                                          \
+    c_entry:                                                                   \
+        for (size_t i = (fs->buffer_ptr + fs->buffer_size) - fs->file_ptr;     \
+             i < fs->buffer_size; i += char_size) {                            \
+            if (delim_cb(&fs->buffer[i]) != delim_val) {                       \
+                log_define(_CSTREAM_H, declare_delim_found_nl_at_end, "", 0);  \
+                return line_len;                                               \
+            }                                                                  \
+            fs->buffer_ptr += char_size;                                       \
+            line_len++;                                                        \
+        }                                                                      \
+        if ((char_size + fs->buffer_ptr) > fs->file_ptr) {                     \
+            if (sync_stream_read(fs, char_size) == 0) {                        \
+                log_define(_CSTREAM_H, declare_delim_failed_sync_at_end, "",   \
+                           0);                                                 \
+                return line_len;                                               \
+            }                                                                  \
+            log_define(_CSTREAM_H, declare_delim_success_sync_at_end, "", 0);  \
+        }                                                                      \
+        goto c_entry;                                                          \
     }
 
 void fs_flush(file_stream *fs)
@@ -198,7 +194,8 @@ void fs_flush(file_stream *fs)
     }
 
     ssize_t opres = 0;
-    if ((opres = write(fs->fd, fs->buffer, fs->buffer_ptr - fs->file_ptr)) == -1) {
+    if ((opres = write(fs->fd, fs->buffer, fs->buffer_ptr - fs->file_ptr)) ==
+        -1) {
         log_define(_CSTREAM_H, fs_flush_failed_to_write, "", 0);
         return;
     }
@@ -274,12 +271,14 @@ int64_t fs_seek(file_stream *fs, int32_t offset, int32_t whence)
     return fs->buffer_ptr;
 }
 
-static file_stream *create_stream(uint8_t stream_size, const char *p, file_stream_mode mode)
+static file_stream *create_stream(uint8_t stream_size, const char *p,
+                                  file_stream_mode mode)
 {
     /*
         we use the buffer-less file IO. Because we are managing our own buffer.
     */
-    int32_t fd = open(p, mode == READ ? O_RDONLY, S_IREAD : O_RDWR | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE);
+    int32_t fd = open(p, mode == READ ? O_RDONLY,
+                      S_IREAD : O_RDWR | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE);
     if (fd == -1) {
         // Well that did not work out so well.
         log_define(_CSTREAM_H, create_stream_open_failed, "", 0);
@@ -299,7 +298,8 @@ static file_stream *create_stream(uint8_t stream_size, const char *p, file_strea
     struct stat stats;
     if (fstat(fd, &stats) == 0) {
         new_stream->file_size = stats.st_size;
-        if ((new_stream->file_size > 0) && (new_stream->file_size < new_stream->buffer_size)) {
+        if ((new_stream->file_size > 0) &&
+            (new_stream->file_size < new_stream->buffer_size)) {
             //
             log_define(_CSTREAM_H, create_stream_buffer_resized, "", 0);
             new_stream->buffer_size = new_stream->file_size;
@@ -388,13 +388,15 @@ static size_t sync_stream_read(file_stream *fs, size_t sm)
             The fast path when you are streaming fixed sizes
         */
         log_define(_CSTREAM_H, sync_stream_read_aligned,
-            "fs->buffer_ptr: %d\n sm: %d\n fs->file_ptr: %d", fs->buffer_ptr, sm, fs->file_ptr);
+                   "fs->buffer_ptr: %d\n sm: %d\n fs->file_ptr: %d",
+                   fs->buffer_ptr, sm, fs->file_ptr);
         if (sm > fs->buffer_size) {
             /*
                 A rare case where you are at the very border
                 but the size is larger then the buffer.
             */
-            log_define(_CSTREAM_H, sync_stream_read_size_larger_than_buffer_size, "", 0);
+            log_define(_CSTREAM_H,
+                       sync_stream_read_size_larger_than_buffer_size, "", 0);
             resize_buffer(fs, sm);
         }
     } else {
@@ -429,7 +431,8 @@ static size_t sync_stream_write(file_stream *fs, size_t sm)
 
     ssize_t opres = 0;
     // flush our buffer
-    if ((opres = write(fs->fd, fs->buffer, fs->buffer_ptr - fs->file_ptr)) == -1) {
+    if ((opres = write(fs->fd, fs->buffer, fs->buffer_ptr - fs->file_ptr)) ==
+        -1) {
         log_define(_CSTREAM_H, sync_stream_write_failed_to_write, "", 0);
         return 0;
     }
@@ -560,7 +563,8 @@ size_t fs_read_line(file_stream *fs, uint8_t **line_start, file_stream_type st)
 declare_delim(fs_get_delim_8, 1, from_char_8);
 declare_delim(fs_get_delim_16, 2, from_char_16);
 declare_delim(fs_get_delim_32, 4, from_char_32);
-size_t fs_get_delim(file_stream *fs, uint8_t **line_start, int32_t delim, file_stream_type st)
+size_t fs_get_delim(file_stream *fs, uint8_t **line_start, int32_t delim,
+                    file_stream_type st)
 {
     switch (st) {
     case ASCII: {
@@ -578,10 +582,7 @@ size_t fs_get_delim(file_stream *fs, uint8_t **line_start, int32_t delim, file_s
     }
 }
 
-int64_t fs_tell(file_stream *fs)
-{
-    return fs->buffer_ptr;
-}
+int64_t fs_tell(file_stream *fs) { return fs->buffer_ptr; }
 
 bit_stream *bs_open(const char *p, file_stream_mode mode)
 {
@@ -615,7 +616,8 @@ uint32_t bs_read(bit_stream *bs)
     if (bs->mask == partmask) {
         log_define(_CSTREAM_H, bs_read_fill, "", 0);
         size_t expected = 0;
-        bs->part = *(uint64_t *)fs_read((file_stream *)bs, sizeof(uint64_t), &expected);
+        bs->part = *(uint64_t *)fs_read((file_stream *)bs, sizeof(uint64_t),
+                                        &expected);
     }
     result = bs->part & bs->mask;
     bs->mask = bs->mask >> 1;
