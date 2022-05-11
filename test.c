@@ -133,67 +133,95 @@ int file_read_line(FILE *fd, char *buff, size_t s)
     return getline(&buff, &s, fd) != -1;
 }
 
+void gen_test_file(char *filename, ssize_t size)
+{
+    int32_t nr_lines = size / 128;
+    int32_t rem = size % 128;
+    // 128 bytes per line.
+    char buff[128];
+    FILE *f = fopen(filename, "w");
+    for (int i = 0; i < nr_lines; i++) {
+        fprintf(f, "%08d %0118d\n", i + 1, 0);
+    }
+    fclose(f);
+}
+void gen_test_files()
+{
+    gen_test_file("test_1k.txt", 1024);
+    gen_test_file("test_4k.txt", 1024 * 4);
+    gen_test_file("test_8k.txt", 1024 * 8);
+    gen_test_file("test_32k.txt", 1024 * 32);
+    gen_test_file("test_64k.txt", 1024 * 64);
+    gen_test_file("test_128k.txt", 1024 * 128);
+    gen_test_file("test_256k.txt", 1024 * 256);
+    gen_test_file("test_512k.txt", 1024 * 512);
+    gen_test_file("test_1m.txt", 1024 * 1024);
+    gen_test_file("test_10m.txt", 1024 * 1024 * 10);
+    gen_test_file("test_50m.txt", 1024 * 1024 * 50);
+    gen_test_file("test_100m.txt", 1024 * 1024 * 100);
+}
 int main()
 {
-    DEBUG_INIT();
-    // figure out the addresses of all the labels.
+
+    const char *test_file_path = "test_32k.txt";
+    //"//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj";
+
+    // DEBUG_INIT();
+    // [ ] Gen test files
+    // [ ] test lseek
+    // [ ] high level functions. loadall, writeall
+    // [ ] test writing larger than buffer size.
+    // [ ] test reading larger than buffer size.
+    // [ ] test various file sizes
+    // [ ] test bit stream.
+    // [ ] run on windows
+    // [ ] compare against streamers.
+    // [ ] done!
     START_TEST(stream, {});
 
-    int fd = open(
-        "//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj",
-        O_RDONLY, S_IREAD);
+    int fd = open(test_file_path, O_RDONLY, S_IREAD);
     struct stat stats;
     int32_t status = fstat(fd, &stats);
     printf("file size %lli\n", stats.st_size);
     char *bu = (char *)malloc(stats.st_size);
-    MEASURE_MS(stream, file_read_whole, { read(fd, bu, stats.st_size); });
+    MEASURE_NS(stream, file_read_whole, { read(fd, bu, stats.st_size); });
     free(bu);
     close(fd);
 
-    file_stream *fs = fs_open(
-        "//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj",
-        READ);
-    MEASURE_MS(stream, file_stream_128bytes, {
+    file_stream *fs = fs_open(test_file_path, READ);
+    MEASURE_NS(stream, file_stream_128bytes, {
         size_t expected = 128;
         while (fs_read(fs, 128, &expected) != NULL) {
         }
     });
     close_stream(fs);
 
-    fs = fs_open(
-        "//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj",
-        READ);
+    fs = fs_open(test_file_path, READ);
     size_t expected = 8;
-    MEASURE_MS(stream, file_stream_8bytes, {
+    MEASURE_NS(stream, file_stream_8bytes, {
         while (fs_read(fs, 8, &expected) != NULL) {
         }
     });
     close_stream(fs);
 
-    fs = fs_open(
-        "//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj",
-        READ);
+    fs = fs_open(test_file_path, READ);
     expected = 6;
-    MEASURE_MS(stream, file_stream_6bytes, {
+    MEASURE_NS(stream, file_stream_6bytes, {
         while (fs_read(fs, 6, &expected) != NULL) {
         }
     });
     close_stream(fs);
 
     char buff[8];
-    FILE *f = fopen(
-        "//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj",
-        "rb");
-    MEASURE_MS(stream, file_read_8bytes, {
+    FILE *f = fopen(test_file_path, "rb");
+    MEASURE_NS(stream, file_read_8bytes, {
         while (fread(&buff, 8, 1, f)) {
         }
     });
     fclose(f);
 
-    fs = fs_open(
-        "//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj",
-        READ);
-    MEASURE_MS(stream, file_stream_1byte, {
+    fs = fs_open(test_file_path, READ);
+    MEASURE_NS(stream, file_stream_1byte, {
         size_t expected = 64;
         uint8_t *res = fs_read(fs, 64, &expected);
         char c = 0;
@@ -206,41 +234,33 @@ int main()
     });
     close_stream(fs);
 
-    f = fopen(
-        "//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj",
-        "rb");
-    MEASURE_MS(stream, file_read_1byte, {
+    f = fopen(test_file_path, "rb");
+    MEASURE_NS(stream, file_read_1byte, {
         while (fgetc(f) != EOF) {
         }
     });
     fclose(f);
 
-    fs = fs_open(
-        "//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj",
-        READ);
+    fs = fs_open(test_file_path, READ);
     char *line = 0;
-    MEASURE_MS(stream, file_stream_read_line, {
+    MEASURE_NS(stream, file_stream_read_line, {
         while (fs_read_line(fs, (uint8_t **)&line, ASCII)) {
         }
     });
     close_stream(fs);
 
     char lbuff[1024];
-    f = fopen(
-        "//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj",
-        "rb");
-    MEASURE_MS(stream, file_read_line, {
+    f = fopen(test_file_path, "rb");
+    MEASURE_NS(stream, file_read_line, {
         while (file_read_line(f, lbuff, 1024)) {
         }
     });
     fclose(f);
 
-    fs = fs_open(
-        "//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj",
-        READ);
+    fs = fs_open(test_file_path, READ);
     file_stream *ofs = fs_open("out.obj", WRITE);
 
-    MEASURE_MS(stream, file_stream_read_write, {
+    MEASURE_NS(stream, file_stream_read_write, {
         size_t expected = 8;
         uint8_t *buff = fs_read(fs, 8, &expected);
         while (buff) {
@@ -251,9 +271,7 @@ int main()
     close_stream(ofs);
     close_stream(fs);
 
-    fd = open(
-        "//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj",
-        O_RDONLY, S_IREAD);
+    fd = open(test_file_path, O_RDONLY, S_IREAD);
     status = fstat(fd, &stats);
     int32_t num_bytes = stats.st_size;
     bu = (char *)malloc(num_bytes);
@@ -261,13 +279,13 @@ int main()
     close(fd);
 
     int ofd = open("out.obj", O_RDWR | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE);
-    MEASURE_MS(stream, file_write, {
+    MEASURE_NS(stream, file_write, {
         write(ofd, bu, num_bytes);
         close(ofd);
     });
 
     ofs = fs_open("out.obj", WRITE);
-    MEASURE_MS(stream, file_stream_write8, {
+    MEASURE_NS(stream, file_stream_write8, {
         for (int i = 0; i < num_bytes; i += 8) {
             (*(uint64_t *)fs_write(ofs, 8)) = *(uint64_t *)(char *)(bu + i);
         }
@@ -275,7 +293,7 @@ int main()
     });
 
     ofs = fs_open("out.obj", WRITE);
-    MEASURE_MS(stream, file_stream_write6, {
+    MEASURE_NS(stream, file_stream_write6, {
         for (int i = 0; i < num_bytes; i += 6) {
             (*(uint64_t *)fs_write(ofs, 6)) = *(uint64_t *)(char *)(bu + i);
         }
@@ -288,7 +306,7 @@ int main()
     wchar_t *wline = 0;
     int line_len = 0;
 
-    MEASURE_MS(stream, file_stream_read_line, {
+    MEASURE_NS(stream, file_stream_read_line, {
         do {
             line_len = fs_read_line(fs, (uint8_t **)&wline, UNICODE_16);
         } while (line_len != 0);
