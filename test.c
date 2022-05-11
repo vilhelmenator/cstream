@@ -167,7 +167,7 @@ int main()
     //"//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj";
 
     // DEBUG_INIT();
-    // [ ] Gen test files
+    // [x] Gen test files
     // [ ] test lseek
     // [ ] high level functions. loadall, writeall
     // [ ] test writing larger than buffer size.
