@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #else
+#include <execinfo.h>
+#include <stdarg.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
@@ -163,33 +165,49 @@ void gen_test_files()
 int main()
 {
 
-    const char *test_file_path = "test_32k.txt";
+    const char *test_file_path = "test_100m.txt";
     //"//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj";
 
     // DEBUG_INIT();
     // [x] Gen test files
     // [ ] test lseek
+    //   - lseek read. lseek write.
     // [ ] high level functions. loadall, writeall
     // [ ] test writing larger than buffer size.
     // [ ] test reading larger than buffer size.
-    // [ ] test various file sizes
+    // [ ] test various file sizes.
     // [ ] test bit stream.
     // [ ] run on windows
-    // [ ] compare against streamers.
+    // [ ] compare against streamer implementations.
+    // -   - standard C++ and C streaming objects
     // [ ] done!
     START_TEST(stream, {});
+    int64_t a = 0;
+    int64_t b = &gen_test_files;
+    int64_t c = &gen_test_file;
+    MEASURE_TIME(stream, file_read_open, {
+        for (int i = 0; i < 100; i++) {
+            a = i / c;
+            __asm__ __volatile__("");
+        }
+    });
 
-    int fd = open(test_file_path, O_RDONLY, S_IREAD);
     struct stat stats;
+    int fd = open(test_file_path, O_RDONLY, S_IREAD);
     int32_t status = fstat(fd, &stats);
     printf("file size %lli\n", stats.st_size);
     char *bu = (char *)malloc(stats.st_size);
-    MEASURE_NS(stream, file_read_whole, { read(fd, bu, stats.st_size); });
+
+    read(fd, bu, stats.st_size);
+    close(fd);
+
+    fd = open(test_file_path, O_RDONLY, S_IREAD);
+    MEASURE_TIME(stream, file_read_whole, { read(fd, bu, stats.st_size); });
     free(bu);
     close(fd);
 
     file_stream *fs = fs_open(test_file_path, READ);
-    MEASURE_NS(stream, file_stream_128bytes, {
+    MEASURE_TIME(stream, file_stream_128bytes, {
         size_t expected = 128;
         while (fs_read(fs, 128, &expected) != NULL) {
         }
@@ -198,7 +216,7 @@ int main()
 
     fs = fs_open(test_file_path, READ);
     size_t expected = 8;
-    MEASURE_NS(stream, file_stream_8bytes, {
+    MEASURE_TIME(stream, file_stream_8bytes, {
         while (fs_read(fs, 8, &expected) != NULL) {
         }
     });
@@ -206,7 +224,7 @@ int main()
 
     fs = fs_open(test_file_path, READ);
     expected = 6;
-    MEASURE_NS(stream, file_stream_6bytes, {
+    MEASURE_TIME(stream, file_stream_6bytes, {
         while (fs_read(fs, 6, &expected) != NULL) {
         }
     });
@@ -214,14 +232,14 @@ int main()
 
     char buff[8];
     FILE *f = fopen(test_file_path, "rb");
-    MEASURE_NS(stream, file_read_8bytes, {
+    MEASURE_TIME(stream, file_read_8bytes, {
         while (fread(&buff, 8, 1, f)) {
         }
     });
     fclose(f);
 
     fs = fs_open(test_file_path, READ);
-    MEASURE_NS(stream, file_stream_1byte, {
+    MEASURE_TIME(stream, file_stream_1byte, {
         size_t expected = 64;
         uint8_t *res = fs_read(fs, 64, &expected);
         char c = 0;
@@ -235,7 +253,7 @@ int main()
     close_stream(fs);
 
     f = fopen(test_file_path, "rb");
-    MEASURE_NS(stream, file_read_1byte, {
+    MEASURE_TIME(stream, file_read_1byte, {
         while (fgetc(f) != EOF) {
         }
     });
@@ -243,7 +261,7 @@ int main()
 
     fs = fs_open(test_file_path, READ);
     char *line = 0;
-    MEASURE_NS(stream, file_stream_read_line, {
+    MEASURE_TIME(stream, file_stream_read_line, {
         while (fs_read_line(fs, (uint8_t **)&line, ASCII)) {
         }
     });
@@ -251,7 +269,7 @@ int main()
 
     char lbuff[1024];
     f = fopen(test_file_path, "rb");
-    MEASURE_NS(stream, file_read_line, {
+    MEASURE_TIME(stream, file_read_line, {
         while (file_read_line(f, lbuff, 1024)) {
         }
     });
@@ -260,7 +278,7 @@ int main()
     fs = fs_open(test_file_path, READ);
     file_stream *ofs = fs_open("out.obj", WRITE);
 
-    MEASURE_NS(stream, file_stream_read_write, {
+    MEASURE_TIME(stream, file_stream_read_write, {
         size_t expected = 8;
         uint8_t *buff = fs_read(fs, 8, &expected);
         while (buff) {
@@ -279,34 +297,29 @@ int main()
     close(fd);
 
     int ofd = open("out.obj", O_RDWR | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE);
-    MEASURE_NS(stream, file_write, {
-        write(ofd, bu, num_bytes);
-        close(ofd);
-    });
-
+    MEASURE_TIME(stream, file_write, { write(ofd, bu, num_bytes); });
+    close(ofd);
     ofs = fs_open("out.obj", WRITE);
-    MEASURE_NS(stream, file_stream_write8, {
+    MEASURE_TIME(stream, file_stream_write8, {
         for (int i = 0; i < num_bytes; i += 8) {
             (*(uint64_t *)fs_write(ofs, 8)) = *(uint64_t *)(char *)(bu + i);
         }
-        close_stream(ofs);
     });
-
+    close_stream(ofs);
     ofs = fs_open("out.obj", WRITE);
-    MEASURE_NS(stream, file_stream_write6, {
+    MEASURE_TIME(stream, file_stream_write6, {
         for (int i = 0; i < num_bytes; i += 6) {
             (*(uint64_t *)fs_write(ofs, 6)) = *(uint64_t *)(char *)(bu + i);
         }
-        close_stream(ofs);
     });
-
+    close_stream(ofs);
     free(bu);
 
     fs = fs_open("utf8.txt", READ);
     wchar_t *wline = 0;
     int line_len = 0;
 
-    MEASURE_NS(stream, file_stream_read_line, {
+    MEASURE_TIME(stream, file_stream_read_line, {
         do {
             line_len = fs_read_line(fs, (uint8_t **)&wline, UNICODE_16);
         } while (line_len != 0);
