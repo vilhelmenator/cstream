@@ -164,7 +164,7 @@ void gen_test_files()
 }
 int main()
 {
-    signal(SIGSEGV, signal_handler);
+
     const char *test_file_path = "test_100m.txt";
     //"//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj";
 
@@ -293,11 +293,6 @@ int main()
     ofs = fs_open("out.obj", "w");
     MEASURE_TIME(stream, file_stream_write8, {
         for (int i = 0; i < num_bytes; i += 8) {
-            if ((num_bytes - i) < 8) {
-                (*(uint64_t *)fs_write(ofs, num_bytes - i)) =
-                    *(uint64_t *)(char *)(bu + i);
-                break;
-            }
             (*(uint64_t *)fs_write(ofs, 8)) = *(uint64_t *)(char *)(bu + i);
         }
     });
@@ -305,15 +300,6 @@ int main()
     ofs = fs_open("out.obj", "w");
     MEASURE_TIME(stream, file_stream_write6, {
         for (int i = 0; i < num_bytes; i += 6) {
-            if (i == 32766) {
-                int bbb = 0;
-            }
-            if ((num_bytes - i) < 6) {
-                int ii = 0;
-                (*(uint32_t *)fs_write(ofs, num_bytes - i)) =
-                    *(uint32_t *)(char *)(bu + i);
-                break;
-            }
             (*(uint64_t *)fs_write(ofs, 6)) = *(uint64_t *)(char *)(bu + i);
         }
     });
