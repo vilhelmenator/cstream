@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 #include "../ctest/ctest.h"
-CLOGGER(_CSTREAM_H, 4096);
+CLOGGER(_CSTREAM_H);
 
 const static uint64_t page_size = 4096;
 const static uint64_t alloc_size = page_size * 8;
@@ -107,7 +107,14 @@ static inline int swap_32(uint8_t *c)
            (0xff0000 & (res >> 8)) | (0xff000000 & (res >> 24));
 }
 
-typedef enum file_stream_mode_e { READ = 1, WRITE = 2 } file_stream_mode;
+typedef enum file_stream_mode_e {
+    INVALID = 0,
+    READ = 1,
+    WRITE = 2,
+    APPEND = 4,
+    CREATE = 8,
+    TRUNCATE = 16
+} file_stream_mode;
 
 typedef enum file_stream_type_e {
     ASCII = 1,
@@ -271,14 +278,87 @@ int64_t fs_seek(file_stream *fs, int32_t offset, int32_t whence)
     return fs->buffer_ptr;
 }
 
-static file_stream *create_stream(uint8_t stream_size, const char *p,
-                                  file_stream_mode mode)
+typedef struct file_mode_configure_t
 {
+    uint32_t flags;
+    uint32_t mode;
+} file_mode_configure;
+
+static int32_t mode_to_mask(char *m, file_mode_configure *conf)
+{
+    /*
+            read write create truncate append   pos
+        r     1    0     0       0       0     start
+        w     0    1     1       1       0     start
+        a     0    1     1       0       1     end
+        r+    1    1     0       0       0     start
+        w+    1    1     1       1       0     start
+        a+    1    1     1       0       1     start
+    */
+#if defined(LINUX)
+    conf->flags = O_DIRECT;
+#endif
+    conf->flags = 0; //|= O_SYNC;
+    conf->mode = 0;
+    switch (m[0]) {
+    case 'r':
+        if (m[1] == '+') {
+            conf->flags |= O_RDWR;
+            conf->mode |= S_IREAD | S_IWRITE;
+            return READ | WRITE;
+        } else if (m[1] == '\0') {
+            conf->flags |= O_RDONLY;
+            conf->mode |= S_IREAD;
+            return READ;
+        } else {
+            break;
+        }
+    case 'w':
+        if (m[1] == '+') {
+            conf->flags |= O_RDWR | O_CREAT | O_TRUNC;
+            conf->mode |= S_IREAD | S_IWRITE;
+            return READ | WRITE | CREATE | TRUNCATE;
+        } else if (m[1] == '\0') {
+            conf->flags |= O_RDWR | O_CREAT | O_TRUNC;
+            conf->mode |= S_IWRITE;
+            return WRITE | CREATE | TRUNCATE;
+        } else {
+            break;
+        }
+    case 'a':
+        if (m[1] == '+') {
+            conf->flags |= O_RDWR | O_CREAT;
+            conf->mode |= S_IREAD | S_IWRITE;
+            return READ | WRITE | CREATE | APPEND;
+        } else if (m[1] == '\0') {
+            conf->flags |= O_WRONLY | O_CREAT;
+            conf->mode |= S_IWRITE;
+            return WRITE | CREATE | APPEND;
+        } else {
+            break;
+        }
+    default:
+        break;
+    }
+    return INVALID;
+}
+static file_stream *create_stream(uint8_t stream_size, const char *p,
+                                  char *mode)
+{
+    //
+    // the internal mode flag
+    //
+
     /*
         we use the buffer-less file IO. Because we are managing our own buffer.
     */
-    int32_t fd = open(p, mode == READ ? O_RDONLY,
-                      S_IREAD : O_RDWR | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE);
+    file_mode_configure config;
+    file_stream_mode emode = mode_to_mask(mode, &config);
+    if (emode == INVALID) {
+        log_define(_CSTREAM_H, create_stream_mode_failed, "", 0);
+        return NULL;
+    }
+    int32_t fd = open(p, config.flags, config.mode);
     if (fd == -1) {
         // Well that did not work out so well.
         log_define(_CSTREAM_H, create_stream_open_failed, "", 0);
@@ -288,7 +368,7 @@ static file_stream *create_stream(uint8_t stream_size, const char *p,
     // create our stream
     file_stream *new_stream = (file_stream *)malloc(stream_size);
     new_stream->fd = fd;
-    new_stream->mode = mode;
+    new_stream->mode = emode;
     new_stream->buffer_size = alloc_size;
     new_stream->file_size = page_size;
     new_stream->buffer = (uint8_t *)malloc(new_stream->buffer_size);
@@ -309,7 +389,7 @@ static file_stream *create_stream(uint8_t stream_size, const char *p,
     return new_stream;
 }
 
-file_stream *fs_open(const char *p, file_stream_mode mode)
+file_stream *fs_open(const char *p, char *mode)
 {
     /*
         Create a file streaming object
@@ -330,7 +410,7 @@ void close_stream(file_stream *stream)
     }
 }
 
-static void resize_buffer(file_stream *fs, size_t sm)
+static size_t resize_buffer(file_stream *fs, size_t sm)
 {
     /*
         we compute the span of the buffers range in
@@ -365,9 +445,10 @@ static void resize_buffer(file_stream *fs, size_t sm)
     if (start_offset > 0) {
         log_define(_CSTREAM_H, resize_buffer_needed_seek, "", 0);
         // rewind to our last page multiple
-        lseek(fs->fd, -page_size, SEEK_CUR);
-        fs->file_ptr -= page_size;
+        off_t o = lseek(fs->fd, -start_offset, SEEK_CUR);
+        fs->file_ptr -= start_offset;
     }
+    return start_offset;
 }
 
 static size_t sync_stream_read(file_stream *fs, size_t sm)
@@ -447,12 +528,15 @@ static size_t sync_stream_write(file_stream *fs, size_t sm)
                 A rare case where you are at the very border
                 but the size is larger then the buffer.
             */
-            resize_buffer(fs, sm);
-            fs->file_ptr -= page_size;
-            if ((opres = read(fs->fd, fs->buffer, page_size)) == -1) {
-                log_define(_CSTREAM_H, sync_stream_write_failed_to_read, "", 0);
-                return 0;
+            size_t offset = resize_buffer(fs, sm);
+            if (offset > 0) {
+                if ((opres = read(fs->fd, fs->buffer, offset)) == -1) {
+                    log_define(_CSTREAM_H, sync_stream_write_failed_to_read, "",
+                               0);
+                    return 0;
+                }
             }
+            fs->file_ptr += offset;
         }
     } else {
         /*
@@ -460,12 +544,14 @@ static size_t sync_stream_write(file_stream *fs, size_t sm)
             And want to stream the next part.
         */
         log_define(_CSTREAM_H, sync_stream_write_misaligned, "", 0);
-        resize_buffer(fs, sm);
-        fs->file_ptr -= page_size;
-        if ((opres = read(fs->fd, fs->buffer, page_size)) == -1) {
-            log_define(_CSTREAM_H, sync_stream_write_failed_to_read, "", 0);
-            return 0;
+        size_t offset = resize_buffer(fs, sm);
+        if (offset > 0) {
+            if ((opres = read(fs->fd, fs->buffer, offset)) == -1) {
+                log_define(_CSTREAM_H, sync_stream_write_failed_to_read, "", 0);
+                return 0;
+            }
         }
+        fs->file_ptr += offset;
     }
 
     return opres;
@@ -584,7 +670,7 @@ size_t fs_get_delim(file_stream *fs, uint8_t **line_start, int32_t delim,
 
 int64_t fs_tell(file_stream *fs) { return fs->buffer_ptr; }
 
-bit_stream *bs_open(const char *p, file_stream_mode mode)
+bit_stream *bs_open(const char *p, char *mode)
 {
     bit_stream *bs = (bit_stream *)create_stream(sizeof(bit_stream), p, mode);
     bs->mask = 0;

@@ -164,7 +164,7 @@ void gen_test_files()
 }
 int main()
 {
-
+    signal(SIGSEGV, signal_handler);
     const char *test_file_path = "test_100m.txt";
     //"//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj";
 
@@ -182,15 +182,6 @@ int main()
     // -   - standard C++ and C streaming objects
     // [ ] done!
     START_TEST(stream, {});
-    int64_t a = 0;
-    int64_t b = &gen_test_files;
-    int64_t c = &gen_test_file;
-    MEASURE_TIME(stream, file_read_open, {
-        for (int i = 0; i < 100; i++) {
-            a = i / c;
-            __asm__ __volatile__("");
-        }
-    });
 
     struct stat stats;
     int fd = open(test_file_path, O_RDONLY, S_IREAD);
@@ -206,7 +197,7 @@ int main()
     free(bu);
     close(fd);
 
-    file_stream *fs = fs_open(test_file_path, READ);
+    file_stream *fs = fs_open(test_file_path, "r");
     MEASURE_TIME(stream, file_stream_128bytes, {
         size_t expected = 128;
         while (fs_read(fs, 128, &expected) != NULL) {
@@ -214,7 +205,7 @@ int main()
     });
     close_stream(fs);
 
-    fs = fs_open(test_file_path, READ);
+    fs = fs_open(test_file_path, "r");
     size_t expected = 8;
     MEASURE_TIME(stream, file_stream_8bytes, {
         while (fs_read(fs, 8, &expected) != NULL) {
@@ -222,7 +213,7 @@ int main()
     });
     close_stream(fs);
 
-    fs = fs_open(test_file_path, READ);
+    fs = fs_open(test_file_path, "r");
     expected = 6;
     MEASURE_TIME(stream, file_stream_6bytes, {
         while (fs_read(fs, 6, &expected) != NULL) {
@@ -238,7 +229,7 @@ int main()
     });
     fclose(f);
 
-    fs = fs_open(test_file_path, READ);
+    fs = fs_open(test_file_path, "r");
     MEASURE_TIME(stream, file_stream_1byte, {
         size_t expected = 64;
         uint8_t *res = fs_read(fs, 64, &expected);
@@ -259,7 +250,7 @@ int main()
     });
     fclose(f);
 
-    fs = fs_open(test_file_path, READ);
+    fs = fs_open(test_file_path, "r");
     char *line = 0;
     MEASURE_TIME(stream, file_stream_read_line, {
         while (fs_read_line(fs, (uint8_t **)&line, ASCII)) {
@@ -275,8 +266,8 @@ int main()
     });
     fclose(f);
 
-    fs = fs_open(test_file_path, READ);
-    file_stream *ofs = fs_open("out.obj", WRITE);
+    fs = fs_open(test_file_path, "r");
+    file_stream *ofs = fs_open("out.obj", "w");
 
     MEASURE_TIME(stream, file_stream_read_write, {
         size_t expected = 8;
@@ -299,23 +290,37 @@ int main()
     int ofd = open("out.obj", O_RDWR | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE);
     MEASURE_TIME(stream, file_write, { write(ofd, bu, num_bytes); });
     close(ofd);
-    ofs = fs_open("out.obj", WRITE);
+    ofs = fs_open("out.obj", "w");
     MEASURE_TIME(stream, file_stream_write8, {
         for (int i = 0; i < num_bytes; i += 8) {
+            if ((num_bytes - i) < 8) {
+                (*(uint64_t *)fs_write(ofs, num_bytes - i)) =
+                    *(uint64_t *)(char *)(bu + i);
+                break;
+            }
             (*(uint64_t *)fs_write(ofs, 8)) = *(uint64_t *)(char *)(bu + i);
         }
     });
     close_stream(ofs);
-    ofs = fs_open("out.obj", WRITE);
+    ofs = fs_open("out.obj", "w");
     MEASURE_TIME(stream, file_stream_write6, {
         for (int i = 0; i < num_bytes; i += 6) {
+            if (i == 32766) {
+                int bbb = 0;
+            }
+            if ((num_bytes - i) < 6) {
+                int ii = 0;
+                (*(uint32_t *)fs_write(ofs, num_bytes - i)) =
+                    *(uint32_t *)(char *)(bu + i);
+                break;
+            }
             (*(uint64_t *)fs_write(ofs, 6)) = *(uint64_t *)(char *)(bu + i);
         }
     });
     close_stream(ofs);
     free(bu);
 
-    fs = fs_open("utf8.txt", READ);
+    fs = fs_open("utf8.txt", "r");
     wchar_t *wline = 0;
     int line_len = 0;
 
