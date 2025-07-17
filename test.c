@@ -164,9 +164,8 @@ void gen_test_files()
 }
 int main()
 {
-
-    const char *test_file_path = "test_100m.txt";
-    //"//Users/vilhelmsaevarsson/Documents/Thingi10K/raw_meshes/994785.obj";
+    gen_test_file("test_10m.txt", 1024 * 1024 * 10);
+    const char *test_file_path = "test_10m.txt"; // some 100 megabyte text file
 
     // DEBUG_INIT();
     // [x] Gen test files
@@ -267,8 +266,11 @@ int main()
     fclose(f);
 
     fs = fs_open(test_file_path, "r");
-    file_stream *ofs = fs_open("out.obj", "w");
+    file_stream *ofs = fs_open("out.txt", "w");
+    if(ofs == NULL)
+    {
 
+    }
     MEASURE_TIME(stream, file_stream_read_write, {
         size_t expected = 8;
         uint8_t *buff = fs_read(fs, 8, &expected);
@@ -287,17 +289,17 @@ int main()
     read(fd, bu, num_bytes);
     close(fd);
 
-    int ofd = open("out.obj", O_RDWR | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE);
+    int ofd = open("out.txt", O_RDWR | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE);
     MEASURE_TIME(stream, file_write, { write(ofd, bu, num_bytes); });
     close(ofd);
-    ofs = fs_open("out.obj", "w");
+    ofs = fs_open("out.txt", "w");
     MEASURE_TIME(stream, file_stream_write8, {
         for (int i = 0; i < num_bytes; i += 8) {
             (*(uint64_t *)fs_write(ofs, 8)) = *(uint64_t *)(char *)(bu + i);
         }
     });
     close_stream(ofs);
-    ofs = fs_open("out.obj", "w");
+    ofs = fs_open("out.txt", "w");
     MEASURE_TIME(stream, file_stream_write6, {
         for (int i = 0; i < num_bytes; i += 6) {
             (*(uint64_t *)fs_write(ofs, 6)) = *(uint64_t *)(char *)(bu + i);
